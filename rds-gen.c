@@ -89,9 +89,11 @@ static int wli_do_send(struct rds_context *ctxt)
 		while (len) {
 			ret = read(STDIN_FILENO, ptr, len);
 			if (!ret) {
-				verbosef(0, stderr,
-					 "%s: Unexpected end of file reading from %s\n",
-					 progname, ctxt->rc_filename);
+				if (ptr != bytes) {
+					verbosef(0, stderr,
+						 "%s: Unexpected end of file reading from %s\n",
+						 progname, ctxt->rc_filename);
+				}
 				break;
 			}
 			if (ret < 0) {
@@ -106,17 +108,20 @@ static int wli_do_send(struct rds_context *ctxt)
 			ptr += ret;
 			len -= ret;
 		}
+		verbosef(3, stderr, "Read %zd bytes from stdin\n",
+			 ptr - bytes);
 
 		de = pick_dest(ctxt, de);
 		verbosef(2, stderr, "Destination %s\n", de->re_name);
 
-		ret = recvmsg(se->re_fd, &msg, 0);
+		msg.msg_name = &de->re_addr;
+		ret = sendmsg(se->re_fd, &msg, 0);
 		if (!ret)
 			break;
 		if (ret < 0) {
 			ret = -errno;
 			verbosef(0, stderr,
-				 "%s: Error from recvmsg: %s\n",
+				 "%s: Error from sendmsg: %s\n",
 				 progname, strerror(-ret));
 			break;
 		}
@@ -160,9 +165,12 @@ int main(int argc, char *argv[])
 	if (rc)
 		goto out;
 
-	rc = dup_file(&ctxt, STDIN_FILENO, O_RDONLY);
-	if (rc)
-		goto out;
+	if (ctxt.rc_filename) {
+		rc = dup_file(&ctxt, STDIN_FILENO, O_RDONLY);
+		if (rc)
+			goto out;
+	} else
+		ctxt.rc_filename = "<standard input>";
 
 	list_for_each_entry(e, &ctxt.rc_daddrs, re_item) {
 		inet_ntop(PF_INET, &e->re_addr.sin_addr, ipbuf,

@@ -85,7 +85,7 @@ static int parse_endpoint(struct rds_endpoint *nep)
 	if (try) {
 		if (try->ai_addrlen != sizeof(struct sockaddr_in))
 			verbosef(0, stderr,
-				 "%s: OMG WTF BBQ!  try->ai_addrlen = %d, sizeof(struct sockaddr_in) = %d\n",
+				 "%s: OMG WTF BBQ!  try->ai_addrlen = %d, sizeof(struct sockaddr_in) = %zd\n",
 				 progname, try->ai_addrlen,
 				 sizeof(struct sockaddr_in));
 
@@ -333,7 +333,7 @@ int rds_bind(struct rds_context *ctxt)
 		goto out;
 	}
 
-	if (!e->re_sndbuf) {
+	if (e->re_sndbuf) {
 		rc = setsockopt(e->re_fd, SOL_RDS, RDS_SNDBUF,
 				&e->re_sndbuf, sizeof(e->re_sndbuf));
 		if (rc) {

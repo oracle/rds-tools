@@ -7,9 +7,9 @@
 #ifndef __RDS_TOOL_H
 #define __RDS_TOOL_H
 
-#define AF_RDS 32
+#define AF_RDS 21
 #define PF_RDS AF_RDS
-#define SOL_RDS 272
+#define SOL_RDS 12345
 #define RDS_SNDBUF 2
 
 #define RDS_TOOL_BASE_OPTS ":s:m:f:-:vqhV"

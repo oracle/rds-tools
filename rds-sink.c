@@ -44,26 +44,50 @@ void print_version()
 
 static int wli_do_recv(struct rds_context *ctxt)
 {
-	char bytes[ctxt->rc_msgsize];
+	char peek_bytes[0]; 
 	char *ptr;
 	ssize_t len, ret = 0;
 	struct rds_endpoint *e = ctxt->rc_saddr;
-	struct iovec iov = {
-		.iov_base = bytes,
-		.iov_len = ctxt->rc_msgsize,
+	struct iovec peek_iov = {
+		.iov_base = peek_bytes,
+		.iov_len = 0,
+	};
+	struct iovec iov;
+	struct msghdr peek_msg = {
+		.msg_name = &e->re_addr,
+		.msg_namelen = sizeof(struct sockaddr_in),
+		.msg_iov = &peek_iov,
+		.msg_iovlen = 1,
 	};
 	struct msghdr msg = {
 		.msg_name = &e->re_addr,
 		.msg_namelen = sizeof(struct sockaddr_in),
 		.msg_iov = &iov,
 		.msg_iovlen = 1,
-		.msg_control = NULL,
-		.msg_controllen = 0,
-		.msg_flags = 0,
 	};
 
 	verbosef(2, stderr, "Starting receive loop\n");
 	while (1) {
+		ret = recvmsg(e->re_fd, &peek_msg, MSG_PEEK|MSG_TRUNC);
+		if (!ret)
+			break;
+		if (ret < 0) {
+			ret = -errno;
+			verbosef(0, stderr,
+				 "%s: Error from recvmsg: %s\n",
+				 progname, strerror(-ret));
+			break;
+		}
+
+		if (ret > iov.iov_len) {
+			verbosef(3, stderr,
+				 "Growing buffer to %zd bytes\n",
+				 ret);
+			iov.iov_len = ret;
+			iov.iov_base = malloc(sizeof(char) *
+					      iov.iov_len);
+		}
+
 		ret = recvmsg(e->re_fd, &msg, 0);
 		if (!ret)
 			break;
@@ -76,7 +100,7 @@ static int wli_do_recv(struct rds_context *ctxt)
 		}
 
 		len = ret;
-		ptr = bytes;
+		ptr = iov.iov_base;
 		while (len) {
 			ret = write(STDOUT_FILENO, ptr, len);
 			if (!ret) {
@@ -130,9 +154,12 @@ int main(int argc, char *argv[])
 	if (rc)
 		goto out;
 
-	rc = dup_file(&ctxt, STDOUT_FILENO, O_CREAT|O_WRONLY);
-	if (rc)
-		goto out;
+	if (ctxt.rc_filename) {
+		rc = dup_file(&ctxt, STDOUT_FILENO, O_CREAT|O_WRONLY);
+		if (rc)
+			goto out;
+	} else
+		ctxt.rc_filename = "<standard output>";
 
 	rc = wli_do_recv(&ctxt);
 

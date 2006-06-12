@@ -22,6 +22,7 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
+#include "stats.h"
 
 
 /* This gets changed in parse_options() */
@@ -249,6 +250,26 @@ int parse_options(int argc, char *argv[], const char *opts,
 				ctxt->rc_filename = optarg;
 				break;
 
+			case 'i':
+				rc = get_number(optarg, &val);
+				if (rc) {
+					verbosef(0, stderr,
+						 "%s: Invalid number: %s\n",
+						 progname, optarg);
+					break;
+				}
+
+				if (val > LONG_MAX) {
+					rc = -EINVAL;
+					verbosef(0, stderr,
+						 "%s: Sleep interval too large: %"PRIu64"\n",
+						 progname, val);
+				} else
+					stats_init((long)val);
+
+				break;
+
+
 			case 'v':
 				verbose++;
 				break;
@@ -264,6 +285,19 @@ int parse_options(int argc, char *argv[], const char *opts,
 
 			case 'h':
 				print_usage(0);
+				break;
+
+			case '-':
+				if (!strcmp(optarg, "help"))
+					print_usage(0);
+				else if (!strcmp(optarg, "version"))
+					print_version();
+				else {
+					rc = -EINVAL;
+					verbosef(0, stderr,
+						 "%s: Invalid argument: \'--%s\'\n",
+						 progname, optarg);
+				}
 				break;
 
 			case '?':
@@ -362,7 +396,7 @@ int dup_file(struct rds_context *ctxt, int fd, int flags)
 
 	if (tmp_fd != fd) {
 		rc = dup2(tmp_fd, fd);
-		if (rc) {
+		if (rc < 0) {
 			rc = -errno;
 			switch (fd) {
 				case STDIN_FILENO:
@@ -386,7 +420,13 @@ int dup_file(struct rds_context *ctxt, int fd, int flags)
 				 "%s: Unable to set file \"%s\" as %s: %s\n",
 				 progname, ctxt->rc_filename, type,
 				 strerror(-rc));
-		}
+		} else if (rc != fd) {
+			verbosef(0, stderr,
+				 "%s: dup2(2) failed for some reason!\n",
+				 progname);
+			rc = -EBADF;
+		} else
+			rc = 0;
 	}
 
 out:

@@ -45,7 +45,7 @@ static int discover_constant(const char *path, int official)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0)
-		explode("Can't open RDS constant file");
+		explode("Can't open address constant");
 
 	while (total < sizeof(buf)) {
 		ret = read(fd, buf + total, sizeof(buf) - total);

@@ -22,7 +22,7 @@
 # define RDS_SNDBUF 2
 #endif
 
-#define RDS_TOOL_BASE_OPTS ":s:m:f:-:vqhV"
+#define RDS_TOOL_BASE_OPTS ":s:m:f:i:-:vqhV"
 #define RDS_SINK_OPTS
 #define RDS_GEN_OPTS "d:b:l:"
 

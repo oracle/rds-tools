@@ -5,9 +5,12 @@ CFLAGS = -O2 -Wall
 CPPFLAGS = -DDEBUG_EXE -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
 HEADERS = kernel-list.h rdstools.h pfhack.h
-COMMON_SOURCES = options.c pfhack.c
+COMMON_SOURCES = options.c stats.c pfhack.c
 SOURCES = $(addsuffix .c,$(PROGRAMS)) $(COMMON_SOURCES)
 CLEAN_OBJECTS = $(addsuffix .o,$(PROGRAMS)) $(subst .c,.o,$(COMMON_SOURCES))
+
+# This is the default
+DYNAMIC_PF_RDS = true
 
 ifneq ($(DYNAMIC_PF_RDS),)
 CPPFLAGS += -DDYNAMIC_PF_RDS

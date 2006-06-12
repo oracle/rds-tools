@@ -15,9 +15,11 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include "kernel-list.h"
 #include "rdstool.h"
+#include "stats.h"
 
 void print_usage(int rc)
 {
@@ -68,6 +70,11 @@ static int wli_do_recv(struct rds_context *ctxt)
 
 	verbosef(2, stderr, "Starting receive loop\n");
 	while (1) {
+		/* Sleap until the socket is ready */
+		ret = stats_sleep(e->re_fd, -1);
+		if (ret)
+			break;
+
 		ret = recvmsg(e->re_fd, &peek_msg, MSG_PEEK|MSG_TRUNC);
 		if (!ret)
 			break;
@@ -100,6 +107,12 @@ static int wli_do_recv(struct rds_context *ctxt)
 		}
 
 		len = ret;
+		stats_recv(len);
+
+		ret = stats_print();
+		if (ret)
+			break;
+
 		ptr = iov.iov_base;
 		while (len) {
 			ret = write(STDOUT_FILENO, ptr, len);
@@ -118,6 +131,7 @@ static int wli_do_recv(struct rds_context *ctxt)
 				break;
 			}
 
+			stats_write(ret);
 			ptr += ret;
 			len -= ret;
 		}

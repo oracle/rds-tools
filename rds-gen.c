@@ -19,6 +19,7 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
+#include "stats.h"
 
 void print_usage(int rc)
 {
@@ -105,16 +106,26 @@ static int wli_do_send(struct rds_context *ctxt)
 				break;
 			}
 
+			stats_read(ret);
 			ptr += ret;
 			len -= ret;
 		}
 		verbosef(3, stderr, "Read %zd bytes from stdin\n",
 			 ptr - bytes);
 
+		if (len)
+			break;
+
 		de = pick_dest(ctxt, de);
 		verbosef(2, stderr, "Destination %s\n", de->re_name);
 
 		msg.msg_name = &de->re_addr;
+
+		/* Sleep if the socket is full */
+		ret = stats_sleep(-1, se->re_fd);
+		if (ret)
+			break;
+
 		ret = sendmsg(se->re_fd, &msg, 0);
 		if (!ret)
 			break;
@@ -126,13 +137,18 @@ static int wli_do_send(struct rds_context *ctxt)
 			break;
 		}
 
-		if (len)
+		stats_send(ret);
+
+		ret = stats_print();
+		if (ret)
 			break;
 	}
 	verbosef(2, stderr, "Stopping send loop\n");
 
 	return ret;
 }
+
+
 int main(int argc, char *argv[])
 {
 	int rc;
@@ -158,7 +174,7 @@ int main(int argc, char *argv[])
 
 	inet_ntop(PF_INET, &ctxt.rc_saddr->re_addr.sin_addr, ipbuf,
 		  INET_ADDRSTRLEN);
-	verbosef(2, stderr, "Binding endpoint %s:%d\n",
+	verbosef(1, stderr, "Binding endpoint %s:%d\n",
 		ipbuf, ntohs(ctxt.rc_saddr->re_addr.sin_port));
 
 	rc = rds_bind(&ctxt);

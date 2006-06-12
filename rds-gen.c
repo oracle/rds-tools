@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 
 	inet_ntop(PF_INET, &ctxt.rc_saddr->re_addr.sin_addr, ipbuf,
 		  INET_ADDRSTRLEN);
-	verbosef(1, stderr, "Binding endpoint %s:%d\n",
+	verbosef(2, stderr, "Binding endpoint %s:%d\n",
 		ipbuf, ntohs(ctxt.rc_saddr->re_addr.sin_port));
 
 	rc = rds_bind(&ctxt);

@@ -7,10 +7,20 @@
 #ifndef __RDS_TOOL_H
 #define __RDS_TOOL_H
 
-#define AF_RDS 21
-#define PF_RDS AF_RDS
-#define SOL_RDS 12345
-#define RDS_SNDBUF 2
+#include "pfhack.h"
+
+#ifndef AF_RDS
+# define AF_RDS OFFICIAL_PF_RDS
+#endif
+#ifndef PF_RDS
+# define PF_RDS AF_RDS
+#endif
+#ifndef SOL_RDS
+# define SOL_RDS OFFICIAL_SOL_RDS
+#endif
+#ifndef RDS_SNDBUF
+# define RDS_SNDBUF 2
+#endif
 
 #define RDS_TOOL_BASE_OPTS ":s:m:f:-:vqhV"
 #define RDS_SINK_OPTS

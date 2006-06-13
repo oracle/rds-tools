@@ -19,7 +19,6 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
-#include "stats.h"
 
 void print_usage(int rc)
 {
@@ -52,7 +51,9 @@ static int empty_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
 	if (!ctxt->rc_filename)
 		len = 0;  /* Throw it away */
 
-	while (len) {
+	while (len && runningp()) {
+		stats_print();
+
 		ret = write(STDOUT_FILENO, ptr, len);
 		if (!ret) {
 			verbosef(0, stderr,
@@ -63,6 +64,9 @@ static int empty_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
 		}
 		if (ret < 0) {
 			ret = -errno;
+			if (ret == -EINTR)
+				continue;
+
 			verbosef(0, stderr,
 				 "%s: Error writing to %s: %s\n",
 				 progname, ctxt->rc_filename,
@@ -74,6 +78,32 @@ static int empty_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
 		ptr += ret;
 		len -= ret;
 		ret = 0;
+	}
+
+	return ret;
+}
+
+static ssize_t recv_buff(struct rds_endpoint *e, struct msghdr *msg,
+			 int flags)
+{
+	ssize_t ret = 0;
+
+	while (runningp()) {
+		stats_print();
+
+		ret = recvmsg(e->re_fd, msg, flags);
+		if (ret < 0) {
+			ret = -errno;
+			if (ret == -EINTR)
+				continue;
+
+			verbosef(0, stderr,
+				 "%s: Error from recvmsg: %s\n",
+				 progname, strerror(-ret));
+		}
+
+		/* Success */
+		break;
 	}
 
 	return ret;
@@ -103,22 +133,14 @@ static int wli_do_recv(struct rds_context *ctxt)
 	};
 
 	verbosef(2, stderr, "Starting receive loop\n");
-	while (1) {
-		/* Sleap until the socket is ready */
-		ret = stats_sleep(e->re_fd, -1);
-		if (ret)
-			break;
 
-		ret = recvmsg(e->re_fd, &peek_msg, MSG_PEEK|MSG_TRUNC);
-		if (!ret)
+	stats_start();
+
+	while (runningp()) {
+		/* Calls stats_print() */
+		ret = recv_buff(e, &peek_msg, MSG_PEEK|MSG_TRUNC);
+		if (ret < 0)
 			break;
-		if (ret < 0) {
-			ret = -errno;
-			verbosef(0, stderr,
-				 "%s: Error from recvmsg: %s\n",
-				 progname, strerror(-ret));
-			break;
-		}
 
 		if (ret > iov.iov_len) {
 			verbosef(3, stderr,
@@ -129,29 +151,22 @@ static int wli_do_recv(struct rds_context *ctxt)
 					      iov.iov_len);
 		}
 
-		ret = recvmsg(e->re_fd, &msg, 0);
-		if (!ret)
+		/* Calls stats_print() */
+		ret = recv_buff(e, &msg, 0);
+		if (ret < 0)
 			break;
-		if (ret < 0) {
-			ret = -errno;
-			verbosef(0, stderr,
-				 "%s: Error from recvmsg: %s\n",
-				 progname, strerror(-ret));
-			break;
-		}
 
 		len = ret;
 		stats_add_recv(len);
 
-		ret = stats_print();
-		if (ret)
-			break;
-
+		/* Calls stats_print() */
 		ret = empty_buff(ctxt, iov.iov_base, len);
 		if (ret)
 			break;
 	}
 	verbosef(2, stderr, "Stopping receive loop\n");
+
+	stats_total();
 
 	return ret;
 }
@@ -186,6 +201,13 @@ int main(int argc, char *argv[])
 			goto out;
 		if (!strcmp(ctxt.rc_filename, "-"))
 			ctxt.rc_filename = "<standard output>";
+	}
+
+	setup_signals();
+	if (rc) {
+		verbosef(0, stderr, "%s: Unable to initialize signals\n",
+			 progname);
+		goto out;
 	}
 
 	rc = wli_do_recv(&ctxt);

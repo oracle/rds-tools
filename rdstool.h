@@ -57,6 +57,22 @@ extern int parse_options(int argc, char *argv[], const char *opts,
 			 struct rds_context *ctxt);
 extern int rds_bind(struct rds_context *ctxt);
 extern int dup_file(struct rds_context *ctxt, int fd, int flags);
+extern int setup_signals(void);
+extern int runningp(void);
+
+/* stats.c */
+extern int stats_init(int delay);
+extern void stats_extended(int extendedp);
+extern void stats_start(void);
+extern void stats_print(void);
+extern void stats_total(void);
+
+extern void stats_add_recv(uint64_t bytes);
+extern void stats_add_send(uint64_t bytes);
+extern uint64_t stats_get_send(void);
+extern void stats_add_read(uint64_t bytes);
+extern void stats_add_write(uint64_t bytes);
+
 
 /* Provided by C files with main() */
 extern void print_usage(int rc);

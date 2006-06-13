@@ -19,7 +19,6 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
-#include "stats.h"
 
 void print_usage(int rc)
 {
@@ -69,7 +68,8 @@ static ssize_t fill_stdin(struct rds_context *ctxt, char *bytes,
 	ssize_t ret = 0;
 	char *ptr = bytes;
 
-	while (len) {
+	while (len && runningp()) {
+		stats_print();
 		ret = read(STDIN_FILENO, ptr, len);
 		if (!ret) {
 			if (ptr != bytes) {
@@ -82,6 +82,9 @@ static ssize_t fill_stdin(struct rds_context *ctxt, char *bytes,
 		}
 		if (ret < 0) {
 			ret = -errno;
+			if (ret == -EINTR)
+				continue;
+
 			verbosef(0, stderr,
 				 "%s: Error reading from %s: %s\n",
 				 progname, ctxt->rc_filename,
@@ -105,6 +108,8 @@ static ssize_t fill_pattern(struct rds_context *ctxt, char *bytes,
 {
 	static int first = 1;
 
+	stats_print();
+
 	if (first) {
 		memset(bytes, 0, len);
 		first = 0;
@@ -117,6 +122,7 @@ static ssize_t fill_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
 {
 	ssize_t ret;
 
+	/* Each possible method must handle calling stats_print() */
 	if (ctxt->rc_filename)
 		ret = fill_stdin(ctxt, bytes, len);
 	else
@@ -124,6 +130,32 @@ static ssize_t fill_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
 
 	return ret;
 }
+
+static ssize_t send_buff(struct rds_endpoint *se, struct msghdr *msg)
+{
+	ssize_t ret = 0;
+
+	while (runningp()) {
+		stats_print();
+
+		ret = sendmsg(se->re_fd, msg, 0);
+		if (ret < 0) {
+			ret = -errno;
+			if (ret == -EINTR)
+				continue;
+
+			verbosef(0, stderr,
+				 "%s: Error from sendmsg: %s\n",
+				 progname, strerror(-ret));
+		}
+
+		/* Success */
+		break;
+	}
+
+	return ret;
+}
+
 
 static int wli_do_send(struct rds_context *ctxt)
 {
@@ -145,37 +177,30 @@ static int wli_do_send(struct rds_context *ctxt)
 	};
 
 	verbosef(2, stderr, "Starting send loop\n");
-	while (1) {
+
+	stats_start();
+
+	while (runningp()) {
+		/* Calls stats_print() */
 		ret = fill_buff(ctxt, bytes, ctxt->rc_msgsize);
-		if (ret)
-			break;
+		if (ret) {
+			if (ret == -EINTR)
+				continue;
+			else
+				break;
+		}
 
 		de = pick_dest(ctxt, de);
 		verbosef(2, stderr, "Destination %s\n", de->re_name);
 
 		msg.msg_name = &de->re_addr;
 
-		/* Sleep if the socket is full */
-		ret = stats_sleep(-1, se->re_fd);
-		if (ret)
+		/* Calls stats_print() */
+		ret = send_buff(se, &msg);
+		if (ret < 0)
 			break;
-
-		ret = sendmsg(se->re_fd, &msg, 0);
-		if (!ret)
-			break;
-		if (ret < 0) {
-			ret = -errno;
-			verbosef(0, stderr,
-				 "%s: Error from sendmsg: %s\n",
-				 progname, strerror(-ret));
-			break;
-		}
 
 		stats_add_send(ret);
-
-		ret = stats_print();
-		if (ret)
-			break;
 
 		if (ctxt->rc_total && (stats_get_send() > ctxt->rc_total))
 			break;
@@ -234,6 +259,13 @@ int main(int argc, char *argv[])
 		verbosef(2, stderr,
 			 "Adding destination %s:%d\n", ipbuf,
 			 ntohs(e->re_addr.sin_port));
+	}
+
+	rc = setup_signals();
+	if (rc) {
+		verbosef(0, stderr, "%s: Unable to initialize signals\n",
+			 progname);
+		goto out;
 	}
 
 	rc = wli_do_send(&ctxt);

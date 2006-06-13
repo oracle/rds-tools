@@ -8,8 +8,9 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/select.h>
+#include <signal.h>
 #include <sys/time.h>
+#include <unistd.h>
 #include <time.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -17,112 +18,161 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
-#include "stats.h"
 
-static struct timeval next_print;
 static int stats_delay = 0;  /* Delay in seconds */
+static int print_extended = 0; /* Print read/write stats? */
+static sig_atomic_t time_to_print = 0;
 
 struct rds_tool_stats {
-	uint64_t rs_send;
-	uint64_t rs_send_interval;
-	uint64_t rs_recv;
-	uint64_t rs_recv_interval;
-	uint64_t rs_read;
-	uint64_t rs_read_interval;
-	uint64_t rs_write;
-	uint64_t rs_write_interval;
+	uint64_t rs_send_bytes;
+	uint64_t rs_send_bytes_interval;
+	uint64_t rs_send_packets;
+	uint64_t rs_send_packets_interval;
+	uint64_t rs_recv_bytes;
+	uint64_t rs_recv_bytes_interval;
+	uint64_t rs_recv_packets;
+	uint64_t rs_recv_packets_interval;
+	uint64_t rs_read_bytes;
+	uint64_t rs_read_bytes_interval;
+	uint64_t rs_write_bytes;
+	uint64_t rs_write_bytes_interval;
 } tool_stats;
 
-#define inc_stat(type, val)  do { \
-	tool_stats.rs_##type += val; \
-	tool_stats.rs_##type##_interval += val; \
+#define inc_net_stat(type, val)  do { \
+	tool_stats.rs_##type##_bytes += val; \
+	tool_stats.rs_##type##_bytes_interval += val; \
+	tool_stats.rs_##type##_packets += 1; \
+	tool_stats.rs_##type##_packets_interval += 1; \
+} while (0)
+
+#define inc_io_stat(type, val)  do { \
+	tool_stats.rs_##type##_bytes += val; \
+	tool_stats.rs_##type##_bytes_interval += val; \
 } while (0)
 
 #define clear_interval() do { \
-	tool_stats.rs_send_interval = 0; \
-	tool_stats.rs_recv_interval = 0; \
-	tool_stats.rs_read_interval = 0; \
-	tool_stats.rs_write_interval = 0; \
+	tool_stats.rs_send_bytes_interval = 0; \
+	tool_stats.rs_recv_bytes_interval = 0; \
+	tool_stats.rs_send_packets_interval = 0; \
+	tool_stats.rs_recv_packets_interval = 0; \
+	tool_stats.rs_read_bytes_interval = 0; \
+	tool_stats.rs_write_bytes_interval = 0; \
 } while (0)
 
-void stats_add_read(uint64_t num)
+static void handler(int signum)
 {
-	inc_stat(read, num);
+	time_to_print = 1;
 }
 
-void stats_add_write(uint64_t num)
+static int setup_alarm(void)
 {
-	inc_stat(write, num);
+	int rc = 0;
+	struct sigaction act;
+
+	act.sa_sigaction = NULL;
+	act.sa_restorer = NULL;
+	sigemptyset(&act.sa_mask);
+	act.sa_handler = handler;
+#ifdef SA_INTERRUPT
+	act.sa_flags = SA_INTERRUPT;
+#endif
+	rc = sigaction(SIGALRM, &act, NULL);
+	if (rc) {
+		rc = -errno;
+		verbosef(0, stderr,
+			 "%s: Unable to initialize timer: %s\n",
+			 progname, strerror(-rc));
+	}
+	
+	return rc;
 }
 
-void stats_add_send(uint64_t num)
+void stats_add_read(uint64_t bytes)
 {
-	inc_stat(send, num);
+	inc_io_stat(read, bytes);
+}
+
+void stats_add_write(uint64_t bytes)
+{
+	inc_io_stat(write, bytes);
+}
+
+void stats_add_send(uint64_t bytes)
+{
+	inc_net_stat(send, bytes);
 }
 
 uint64_t stats_get_send(void)
 {
-	return tool_stats.rs_send;
+	return tool_stats.rs_send_bytes;
 }
 
-void stats_add_recv(uint64_t num)
+void stats_add_recv(uint64_t bytes)
 {
-	inc_stat(recv, num);
+	inc_net_stat(recv, bytes);
 }
 
-uint64_t stats_get_recv(void)
+static void stats_arm(void)
 {
-	return tool_stats.rs_recv;
+	time_to_print = 0;
+	alarm(stats_delay);
 }
 
-void stats_init(int delay)
-{
-	stats_delay = delay;
-	if (delay)
-		verbosef(1, stderr,
-			 "%19s %19s %19s %19s\n",
-			 "Bytes sent/s", "Bytes recv/s",
-			 "Bytes read/s", "Bytes written/s");
-}
-
-static void stats_output(struct timeval *now)
-{
-	if (timercmp(now, &next_print, <))
-		return;
-
-	verbosef(0, stderr,
-		 "%19"PRIu64" %19"PRIu64" %19"PRIu64" %19"PRIu64"\n",
-		 tool_stats.rs_send_interval / stats_delay,
-		 tool_stats.rs_recv_interval / stats_delay,
-		 tool_stats.rs_read_interval / stats_delay,
-		 tool_stats.rs_write_interval / stats_delay);
-
-	clear_interval();
-	next_print = *now;
-	next_print.tv_sec += stats_delay;
-}
-
-int stats_print(void)
+int stats_init(int delay)
 {
 	int rc = 0;
-	struct timeval now;
 
-	/* Are stats on? */
-	if (!stats_delay)
-		goto out;
+	stats_delay = delay;
+	if (stats_delay)
+		rc = setup_alarm();
 
-	rc = gettimeofday(&now, NULL);
-	if (rc) {
-		rc = -errno;
-		verbosef(0, stderr, "%s: Error in gettimeofday(): %s\n",
-			 progname, strerror(-rc));
-		goto out;
-	}
-
-	stats_output(&now);
-
-out:
 	return rc;
+}
+
+void stats_extended(int extendedp)
+{
+	print_extended = !!extendedp;
+}
+
+void stats_start(void)
+{
+	if (stats_delay) {
+		verbosef(1, stderr,
+			 "%19s %19s %19s %19s\n",
+			 "Bytes sent/s", "Packets sent/s",
+			 "Bytes recv/s", "Packets recv/s");
+		if (print_extended)
+			verbosef(1, stderr, " %19s %19s",
+				 "Bytes read/s", "Bytes written/s");
+		verbosef(1, stderr, "\n");
+
+		stats_arm();
+	}
+}
+
+static void stats_output(void)
+{
+	verbosef(0, stderr,
+		 "%19"PRIu64" %19"PRIu64" %19"PRIu64" %19"PRIu64,
+		 tool_stats.rs_send_bytes_interval / stats_delay,
+		 tool_stats.rs_send_packets_interval / stats_delay,
+		 tool_stats.rs_recv_bytes_interval / stats_delay,
+		 tool_stats.rs_recv_packets_interval / stats_delay);
+	if (print_extended)
+		verbosef(0, stderr, " %19"PRIu64" %19"PRIu64,
+			 tool_stats.rs_read_bytes_interval / stats_delay,
+			 tool_stats.rs_write_bytes_interval / stats_delay);
+	verbosef(0, stderr, "\n");
+}
+
+void stats_print(void)
+{
+	/* Are stats on? */
+	if (stats_delay && time_to_print) {
+		stats_output();
+		clear_interval();
+		stats_arm();
+	}
 }
 
 void stats_total(void)
@@ -132,73 +182,16 @@ void stats_total(void)
 
 	verbosef(0, stderr,
 		 "Total:\n"
-		 "%19"PRIu64" %19"PRIu64" %19"PRIu64" %19"PRIu64"\n",
-		 tool_stats.rs_send,
-		 tool_stats.rs_recv,
-		 tool_stats.rs_read,
-		 tool_stats.rs_write);
-}
+		 "%19"PRIu64" %19"PRIu64" %19"PRIu64" %19"PRIu64,
+		 tool_stats.rs_send_bytes,
+		 tool_stats.rs_send_packets,
+		 tool_stats.rs_recv_bytes,
+		 tool_stats.rs_recv_packets);
+	if (print_extended)
+		verbosef(0, stderr, " %19"PRIu64" %19"PRIu64,
+			 tool_stats.rs_read_bytes,
+			 tool_stats.rs_write_bytes);
 
-int stats_sleep(int read_fd, int write_fd)
-{
-	int rc, sleep_fd;
-	fd_set sleep_fds;
-	fd_set *read_fds, *write_fds;
-	struct timeval now, sleep;
-
-	if ((read_fd > 0) && (write_fd > 0)) {
-		verbosef(0, stderr, 
-			 "%s: Called stats_sleep() with two fds!\n",
-			 progname);
-		return -EINVAL;
-	}
-
-	if (read_fd > 0) {
-		read_fds = &sleep_fds;
-		write_fds = NULL;
-		sleep_fd = read_fd;
-	} else {
-		write_fds = &sleep_fds;
-		read_fds = NULL;
-		sleep_fd = write_fd;
-	}
-
-	FD_ZERO(&sleep_fds);
-
-	while (1) {
-		FD_SET(sleep_fd, &sleep_fds);
-		rc = gettimeofday(&now, NULL);
-		if (rc) {
-			rc = -errno;
-			verbosef(0, stderr,
-				 "%s: Error in gettimeofday(): %s\n",
-				 progname, strerror(-rc));
-			break;
-		}
-
-		if (stats_delay)
-			stats_output(&now);
-
-		timersub(&next_print, &now, &sleep);
-		rc = select(sleep_fd + 1, read_fds, write_fds, NULL,
-			    stats_delay ? &sleep : NULL);
-
-		if (rc < 0) {
-			rc = -errno;
-			if ((rc != -EAGAIN) && (rc != -EINTR)) {
-				verbosef(0, stderr,
-					 "%s: Error from select(): %s\n",
-					 progname, strerror(-rc));
-				break;
-			}
-			
-			continue;
-		}
-
-		if (rc && FD_ISSET(sleep_fd, &sleep_fds))
-			break;
-	}
-
-	return (rc < 0) ? rc : 0;
+	verbosef(0, stderr, "\n");
 }
 

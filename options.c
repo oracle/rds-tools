@@ -15,6 +15,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
 #include <getopt.h>
 #include <libgen.h>
 #include <inttypes.h>
@@ -22,12 +23,13 @@
 
 #include "kernel-list.h"
 #include "rdstool.h"
-#include "stats.h"
 
 
 /* This gets changed in parse_options() */
 char *progname = "rds-generic-tool";
 unsigned int verbose = 1;
+
+sig_atomic_t running = 1;
 
 
 /*
@@ -248,6 +250,7 @@ int parse_options(int argc, char *argv[], const char *opts,
 
 			case 'f':
 				ctxt->rc_filename = optarg;
+				stats_extended(1);
 				break;
 
 			case 'i':
@@ -264,8 +267,9 @@ int parse_options(int argc, char *argv[], const char *opts,
 					verbosef(0, stderr,
 						 "%s: Sleep interval too large: %"PRIu64"\n",
 						 progname, val);
-				} else
-					stats_init((long)val);
+				} else {
+					rc = stats_init((long)val);
+				}
 
 				break;
 
@@ -432,6 +436,45 @@ int dup_file(struct rds_context *ctxt, int fd, int flags)
 		} else
 			rc = 0;
 	}
+
+out:
+	return rc;
+}
+
+int runningp(void)
+{
+	return running;
+}
+
+void handler(int signum)
+{
+	running = 0;
+}
+
+int setup_signals(void)
+{
+	int rc = -EINVAL;
+	struct sigaction act;
+
+	act.sa_sigaction = NULL;
+	act.sa_restorer = NULL;
+	sigemptyset(&act.sa_mask);
+	act.sa_handler = handler;
+#ifdef SA_INTERRUPT
+	act.sa_flags = SA_INTERRUPT;
+#endif
+
+	if (sigaction(SIGTERM, &act, NULL))
+		goto out;
+
+	if (sigaction(SIGINT, &act, NULL))
+		goto out;
+
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL))  /* Get EPIPE instead */
+		goto out;
+
+	rc = 0;
 
 out:
 	return rc;

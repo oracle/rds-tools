@@ -45,24 +45,34 @@ struct rds_tool_stats {
 	tool_stats.rs_write_interval = 0; \
 } while (0)
 
-void stats_read(uint64_t num)
+void stats_add_read(uint64_t num)
 {
 	inc_stat(read, num);
 }
 
-void stats_write(uint64_t num)
+void stats_add_write(uint64_t num)
 {
 	inc_stat(write, num);
 }
 
-void stats_send(uint64_t num)
+void stats_add_send(uint64_t num)
 {
 	inc_stat(send, num);
 }
 
-void stats_recv(uint64_t num)
+uint64_t stats_get_send(void)
+{
+	return tool_stats.rs_send;
+}
+
+void stats_add_recv(uint64_t num)
 {
 	inc_stat(recv, num);
+}
+
+uint64_t stats_get_recv(void)
+{
+	return tool_stats.rs_recv;
 }
 
 void stats_init(int delay)
@@ -113,6 +123,20 @@ int stats_print(void)
 
 out:
 	return rc;
+}
+
+void stats_total(void)
+{
+	if (!stats_delay)
+		return;
+
+	verbosef(0, stderr,
+		 "Total:\n"
+		 "%19"PRIu64" %19"PRIu64" %19"PRIu64" %19"PRIu64"\n",
+		 tool_stats.rs_send,
+		 tool_stats.rs_recv,
+		 tool_stats.rs_read,
+		 tool_stats.rs_write);
 }
 
 int stats_sleep(int read_fd, int write_fd)

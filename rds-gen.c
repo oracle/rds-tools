@@ -63,11 +63,72 @@ static struct rds_endpoint *pick_dest(struct rds_context *ctxt,
 	return list_entry(next, struct rds_endpoint, re_item);
 }
 
+static ssize_t fill_stdin(struct rds_context *ctxt, char *bytes,
+			  ssize_t len)
+{
+	ssize_t ret = 0;
+	char *ptr = bytes;
+
+	while (len) {
+		ret = read(STDIN_FILENO, ptr, len);
+		if (!ret) {
+			if (ptr != bytes) {
+				verbosef(0, stderr,
+					 "%s: Unexpected end of file reading from %s\n",
+					 progname, ctxt->rc_filename);
+				ret = -EPIPE;
+			}
+			break;
+		}
+		if (ret < 0) {
+			ret = -errno;
+			verbosef(0, stderr,
+				 "%s: Error reading from %s: %s\n",
+				 progname, ctxt->rc_filename,
+				 strerror(-ret));
+			break;
+		}
+
+		stats_add_read(ret);
+		ptr += ret;
+		len -= ret;
+		ret = 0;  /* If this filled the buffer, we return success */
+	}
+	verbosef(3, stderr, "Read %zd bytes from stdin\n",
+		 ptr - bytes);
+	
+	return ret;
+}
+
+static ssize_t fill_pattern(struct rds_context *ctxt, char *bytes,
+			    ssize_t len)
+{
+	static int first = 1;
+
+	if (first) {
+		memset(bytes, 0, len);
+		first = 0;
+	}
+
+	return 0;
+}
+
+static ssize_t fill_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
+{
+	ssize_t ret;
+
+	if (ctxt->rc_filename)
+		ret = fill_stdin(ctxt, bytes, len);
+	else
+		ret = fill_pattern(ctxt, bytes, len);
+
+	return ret;
+}
+
 static int wli_do_send(struct rds_context *ctxt)
 {
 	char bytes[ctxt->rc_msgsize];
-	char *ptr;
-	ssize_t len, ret = 0;
+	int ret = 0;
 	struct rds_endpoint *de = NULL, *se = ctxt->rc_saddr;
 	struct iovec iov = {
 		.iov_base = bytes,
@@ -85,35 +146,8 @@ static int wli_do_send(struct rds_context *ctxt)
 
 	verbosef(2, stderr, "Starting send loop\n");
 	while (1) {
-		len = ctxt->rc_msgsize;
-		ptr = bytes;
-		while (len) {
-			ret = read(STDIN_FILENO, ptr, len);
-			if (!ret) {
-				if (ptr != bytes) {
-					verbosef(0, stderr,
-						 "%s: Unexpected end of file reading from %s\n",
-						 progname, ctxt->rc_filename);
-				}
-				break;
-			}
-			if (ret < 0) {
-				ret = -errno;
-				verbosef(0, stderr,
-					 "%s: Error reading from %s: %s\n",
-					 progname, ctxt->rc_filename,
-					 strerror(-ret));
-				break;
-			}
-
-			stats_read(ret);
-			ptr += ret;
-			len -= ret;
-		}
-		verbosef(3, stderr, "Read %zd bytes from stdin\n",
-			 ptr - bytes);
-
-		if (len)
+		ret = fill_buff(ctxt, bytes, ctxt->rc_msgsize);
+		if (ret)
 			break;
 
 		de = pick_dest(ctxt, de);
@@ -137,13 +171,18 @@ static int wli_do_send(struct rds_context *ctxt)
 			break;
 		}
 
-		stats_send(ret);
+		stats_add_send(ret);
 
 		ret = stats_print();
 		if (ret)
 			break;
+
+		if (ctxt->rc_total && (stats_get_send() > ctxt->rc_total))
+			break;
 	}
 	verbosef(2, stderr, "Stopping send loop\n");
+
+	stats_total();
 
 	return ret;
 }
@@ -174,8 +213,8 @@ int main(int argc, char *argv[])
 
 	inet_ntop(PF_INET, &ctxt.rc_saddr->re_addr.sin_addr, ipbuf,
 		  INET_ADDRSTRLEN);
-	verbosef(1, stderr, "Binding endpoint %s:%d\n",
-		ipbuf, ntohs(ctxt.rc_saddr->re_addr.sin_port));
+	verbosef(2, stderr, "Binding endpoint %s:%d\n",
+		 ipbuf, ntohs(ctxt.rc_saddr->re_addr.sin_port));
 
 	rc = rds_bind(&ctxt);
 	if (rc)
@@ -185,8 +224,9 @@ int main(int argc, char *argv[])
 		rc = dup_file(&ctxt, STDIN_FILENO, O_RDONLY);
 		if (rc)
 			goto out;
-	} else
-		ctxt.rc_filename = "<standard input>";
+		if (!strcmp(ctxt.rc_filename, "-"))
+			ctxt.rc_filename = "<standard input>";
+	}
 
 	list_for_each_entry(e, &ctxt.rc_daddrs, re_item) {
 		inet_ntop(PF_INET, &e->re_addr.sin_addr, ipbuf,

@@ -386,6 +386,10 @@ int dup_file(struct rds_context *ctxt, int fd, int flags)
 	int tmp_fd, rc = 0;
 	char *type;
 
+	/* "-" is stdin/stdout */
+	if (!strcmp(ctxt->rc_filename, "-"))
+		goto out;
+
 	tmp_fd = open64(ctxt->rc_filename, flags);
 	if (tmp_fd < 0) {
 		rc = -errno;

@@ -44,10 +44,44 @@ void print_version()
 	exit(0);
 }
 
+static int empty_buff(struct rds_context *ctxt, char *bytes, ssize_t len)
+{
+	int ret = 0;
+	char *ptr = bytes;
+
+	if (!ctxt->rc_filename)
+		len = 0;  /* Throw it away */
+
+	while (len) {
+		ret = write(STDOUT_FILENO, ptr, len);
+		if (!ret) {
+			verbosef(0, stderr,
+				 "%s: Unexpected end of file writing to %s\n",
+				 progname, ctxt->rc_filename);
+			ret = -EPIPE;
+			break;
+		}
+		if (ret < 0) {
+			ret = -errno;
+			verbosef(0, stderr,
+				 "%s: Error writing to %s: %s\n",
+				 progname, ctxt->rc_filename,
+				 strerror(-ret));
+			break;
+		}
+
+		stats_add_write(ret);
+		ptr += ret;
+		len -= ret;
+		ret = 0;
+	}
+
+	return ret;
+}
+
 static int wli_do_recv(struct rds_context *ctxt)
 {
 	char peek_bytes[0]; 
-	char *ptr;
 	ssize_t len, ret = 0;
 	struct rds_endpoint *e = ctxt->rc_saddr;
 	struct iovec peek_iov = {
@@ -107,36 +141,14 @@ static int wli_do_recv(struct rds_context *ctxt)
 		}
 
 		len = ret;
-		stats_recv(len);
+		stats_add_recv(len);
 
 		ret = stats_print();
 		if (ret)
 			break;
 
-		ptr = iov.iov_base;
-		while (len) {
-			ret = write(STDOUT_FILENO, ptr, len);
-			if (!ret) {
-				verbosef(0, stderr,
-					 "%s: Unexpected end of file writing to %s\n",
-					 progname, ctxt->rc_filename);
-				break;
-			}
-			if (ret < 0) {
-				ret = -errno;
-				verbosef(0, stderr,
-					 "%s: Error writing to %s: %s\n",
-					 progname, ctxt->rc_filename,
-					 strerror(-ret));
-				break;
-			}
-
-			stats_write(ret);
-			ptr += ret;
-			len -= ret;
-		}
-
-		if (len)
+		ret = empty_buff(ctxt, iov.iov_base, len);
+		if (ret)
 			break;
 	}
 	verbosef(2, stderr, "Stopping receive loop\n");
@@ -172,8 +184,9 @@ int main(int argc, char *argv[])
 		rc = dup_file(&ctxt, STDOUT_FILENO, O_CREAT|O_WRONLY);
 		if (rc)
 			goto out;
-	} else
-		ctxt.rc_filename = "<standard output>";
+		if (!strcmp(ctxt.rc_filename, "-"))
+			ctxt.rc_filename = "<standard output>";
+	}
 
 	rc = wli_do_recv(&ctxt);
 

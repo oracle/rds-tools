@@ -27,7 +27,7 @@ void print_usage(int rc)
 
 	verbosef(0, output,
 		 "Usage: %s -s <source_ip>:<source_port>\n"
-		 "       %*s [-f <output_file>] [-m <msg_size>]\n"
+		 "       %*s [-f <output_file>] [-m <msg_size>] [-i <interval>]\n"
 		 "       %*s [-v ...] [-q ...]\n"
 		 "       %s -h\n"
 		 "       %s -V\n",

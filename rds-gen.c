@@ -194,6 +194,9 @@ static int wli_do_send(struct rds_context *ctxt)
 		verbosef(2, stderr, "Destination %s\n", de->re_name);
 
 		msg.msg_name = &de->re_addr;
+		if (ctxt->rc_total &&
+		    ((stats_get_send() + ctxt->rc_msgsize) > ctxt->rc_total))
+			iov.iov_len = ctxt->rc_total - stats_get_send();
 
 		/* Calls stats_print() */
 		ret = send_buff(se, &msg);
@@ -202,7 +205,7 @@ static int wli_do_send(struct rds_context *ctxt)
 
 		stats_add_send(ret);
 
-		if (ctxt->rc_total && (stats_get_send() > ctxt->rc_total))
+		if (ctxt->rc_total && (stats_get_send() >= ctxt->rc_total))
 			break;
 	}
 	verbosef(2, stderr, "Stopping send loop\n");

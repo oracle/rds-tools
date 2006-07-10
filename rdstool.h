@@ -7,6 +7,9 @@
 #ifndef __RDS_TOOL_H
 #define __RDS_TOOL_H
 
+#include <netinet/in.h>
+
+#include "kernel-list.h"
 #include "pfhack.h"
 
 #ifndef AF_RDS
@@ -20,6 +23,9 @@
 #endif
 #ifndef RDS_SNDBUF
 # define RDS_SNDBUF 2
+#endif
+#ifndef RDS_STATS_GLOBAL
+# define RDS_STATS_GLOBAL 3
 #endif
 
 #define RDS_TOOL_BASE_OPTS ":s:m:f:i:-:vqhV"

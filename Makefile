@@ -19,7 +19,7 @@ else
 COMMON_OBJECTS = $(subst .c,.o,$(filter-out pfhack.c,$(COMMON_SOURCES)))
 endif
 
-PROGRAMS = rds-gen rds-sink rds-get-stats
+PROGRAMS = rds-gen rds-sink rds-info
 
 all-programs: $(PROGRAMS)
 

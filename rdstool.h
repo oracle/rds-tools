@@ -24,9 +24,8 @@
 #ifndef RDS_SNDBUF
 # define RDS_SNDBUF 2
 #endif
-#ifndef RDS_STATS_GLOBAL
-# define RDS_STATS_GLOBAL 3
-#endif
+#define RDS_INFO_COUNTERS       10000
+#define RDS_INFO_CONNECTIONS    10001
 
 #define RDS_TOOL_BASE_OPTS ":s:m:f:i:-:vqhV"
 #define RDS_SINK_OPTS

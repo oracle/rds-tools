@@ -54,16 +54,29 @@ struct rds_info_connection {
 };
 
 #define rds_conn_flag(conn, flag, letter) \
-	(conn->flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
+	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
+
+#define min(a, b) (a < b ? a : b)
+
+#define copy_into(var, data, each) ({			\
+	int __ret = 1;					\
+	memset(&var, 0, sizeof(var));			\
+	memcpy(&var, data, min(each, sizeof(var)));	\
+	__ret;						\
+})
+
+#define for_each(var, data, each, len) 			\
+	for (;len > 0 && copy_into(var, data, each);	\
+	     data += each, len -= min(len, each))
 
 int main(int argc, char **argv)
 {
 	socklen_t len = 0;
 	void *data = NULL;
-	size_t i;
 	int status = 1;
 	int info = 0;
 	int fd;
+	int each;
 	int c;
 
 	while ((c = getopt(argc, argv, "+cs")) != EOF) {
@@ -95,16 +108,13 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	while (getsockopt(fd, SOL_RDS, info, data, &len)
-			< 0) {
+	while ((each = getsockopt(fd, SOL_RDS, info, data, &len)) < 0) {
 		if (errno != ENOSPC) {
 			verbosef(0, stderr, "%s: Unable get statistics: %s\n",
 				 progname, strerror(errno));
 			goto out;
 		}
 
-		if (len == 0)
-			break;
 
 		if (data)
 			data = realloc(data, len);
@@ -120,37 +130,35 @@ int main(int argc, char **argv)
 	}
 
 	switch(info) {
-		case RDS_INFO_COUNTERS: {
-			struct rds_info_counter *ctr = data;
+	case RDS_INFO_COUNTERS: {
+		struct rds_info_counter ctr;
 
-			for (i = 0; i < len / sizeof(*ctr); i++, ctr++)
-				printf("%-25s: %"PRIu64"\n", ctr->name,
-					ctr->value);
-			break;
+		for_each(ctr, data, each, len)
+			printf("%-25s: %"PRIu64"\n", ctr.name, ctr.value);
+		break;
+	}
+
+	case RDS_INFO_CONNECTIONS: {
+		struct rds_info_connection conn;
+		struct in_addr addr;
+		
+		for_each(conn, data, each, len) {
+			addr.s_addr = conn.laddr;
+			printf("%15s ", inet_ntoa(addr));
+			addr.s_addr = conn.faddr;
+			printf("%15s %16"PRIu64" %16"PRIu64" ",
+				inet_ntoa(addr), conn.next_tx_seq,
+				conn.next_rx_seq);
+			printf("%c%c%c%c%c%c\n",
+			      rds_conn_flag(conn, SEND_PENDING, 's'),
+			      rds_conn_flag(conn, RETRANS_PENDING, 'r'),
+			      rds_conn_flag(conn, ACK_GENERATION_PENDING, 'a'),
+			      rds_conn_flag(conn, ACK_MSG_PENDING, 'A'),
+			      rds_conn_flag(conn, CONNECTING, 'c'),
+			      rds_conn_flag(conn, CONNECTED, 'C'));
 		}
-
-		case RDS_INFO_CONNECTIONS: {
-			struct rds_info_connection *conn = data;
-			struct in_addr addr;
-
-			for (i = 0; i < len / sizeof(*conn); i++, conn++) {
-				addr.s_addr = conn->laddr;
-				printf("%15s ", inet_ntoa(addr));
-				addr.s_addr = conn->faddr;
-				printf("%15s %16"PRIu64" %16"PRIu64" ",
-					inet_ntoa(addr),
-					conn->next_tx_seq,
-					conn->next_rx_seq);
-				printf("%c%c%c%c%c%c\n",
-				  rds_conn_flag(conn, SEND_PENDING, 's'),
-				  rds_conn_flag(conn, RETRANS_PENDING, 'r'),
-				  rds_conn_flag(conn, ACK_GENERATION_PENDING, 'a'),
-				  rds_conn_flag(conn, ACK_MSG_PENDING, 'A'),
-				  rds_conn_flag(conn, CONNECTING, 'c'),
-				  rds_conn_flag(conn, CONNECTED, 'C'));
-			}
-			break;
-		}
+		break;
+	}
 	}
 
 	status = 0;

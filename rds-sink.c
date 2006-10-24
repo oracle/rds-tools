@@ -111,19 +111,11 @@ static ssize_t recv_buff(struct rds_endpoint *e, struct msghdr *msg,
 
 static int wli_do_recv(struct rds_context *ctxt)
 {
-	char peek_bytes[0]; 
-	ssize_t len, ret = 0;
 	struct rds_endpoint *e = ctxt->rc_saddr;
-	struct iovec peek_iov = {
-		.iov_base = peek_bytes,
-		.iov_len = 0,
-	};
-	struct iovec iov;
-	struct msghdr peek_msg = {
-		.msg_name = &e->re_addr,
-		.msg_namelen = sizeof(struct sockaddr_in),
-		.msg_iov = &peek_iov,
-		.msg_iovlen = 1,
+	ssize_t alloced = 0;
+	ssize_t ret = 0;
+	struct iovec iov = {
+		.iov_base = NULL,
 	};
 	struct msghdr msg = {
 		.msg_name = &e->re_addr,
@@ -138,29 +130,33 @@ static int wli_do_recv(struct rds_context *ctxt)
 
 	while (runningp()) {
 		/* Calls stats_print() */
-		ret = recv_buff(e, &peek_msg, MSG_PEEK|MSG_TRUNC);
+		iov.iov_len = 0;
+		ret = recv_buff(e, &msg, MSG_PEEK|MSG_TRUNC);
 		if (ret < 0)
 			break;
 
-		if (ret > iov.iov_len) {
+		if (ret > alloced) {
 			verbosef(3, stderr,
 				 "Growing buffer to %zd bytes\n",
 				 ret);
-			iov.iov_len = ret;
-			iov.iov_base = malloc(sizeof(char) *
-					      iov.iov_len);
+			iov.iov_base = realloc(iov.iov_base, ret);
+			if (iov.iov_base == NULL) {
+				ret = -ENOMEM;
+				break;
+			}
+			alloced = ret;
 		}
 
 		/* Calls stats_print() */
+		iov.iov_len = ret;
 		ret = recv_buff(e, &msg, 0);
 		if (ret < 0)
 			break;
 
-		len = ret;
-		stats_add_recv(len);
+		stats_add_recv(ret);
 
 		/* Calls stats_print() */
-		ret = empty_buff(ctxt, iov.iov_base, len);
+		ret = empty_buff(ctxt, iov.iov_base, ret);
 		if (ret)
 			break;
 	}

@@ -27,7 +27,7 @@ void print_usage(int rc)
 
 	verbosef(0, output,
 		 "Usage: %s -s <source_ip>:<source_port>\n"
-		 "       %*s [-f <output_file>] [-m <msg_size>] [-i <interval>]\n"
+		 "       %*s [-f <output_file>] [-i <interval>]\n"
 		 "       %*s [-v ...] [-q ...]\n"
 		 "       %s -h\n"
 		 "       %s -V\n",
@@ -171,9 +171,7 @@ int main(int argc, char *argv[])
 {
 	int rc;
 	char ipbuf[INET_ADDRSTRLEN];
-	struct rds_context ctxt = {
-		.rc_msgsize = RDS_DEFAULT_MSG_SIZE,
-	};
+	struct rds_context ctxt;
 
 	INIT_LIST_HEAD(&ctxt.rc_daddrs);
 

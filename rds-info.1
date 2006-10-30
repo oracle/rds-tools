@@ -1,0 +1,99 @@
+.Dd October 30, 2006
+.Dt RDS-INFO 1
+.Os
+.Sh NAME
+.Nm rds-info
+.Nd display information about RDS on the system
+.Pp
+.Sh SYNOPSIS
+.Nm rds-info
+.Bk -words
+.Op Fl cfknrst
+
+.Sh DESCRIPTION
+The
+.Nm
+utility presents various sources of information that
+the RDS subsystem maintains.  The options specify which
+information source to display.  Only one may be specified.
+
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl c
+Display global counters.  Each counter increments as its event
+occurs.  The counters may not be reset.  The set of supported counters
+may change over time.
+
+.Dl # /var/zab/rds-tools/rds-info -c
+.Dl ack_entry_hit            : 0
+.Dl ...
+
+.It Fl f
+Display all the flows in the system.  When a message is queued for
+transmission on a socket it creates a flow from its source address
+and port to its destination address and port.  Each flow is displayed
+on one line.  Following its source and destination address and ports is
+the number of bytes that are queued for transmission in messages on
+that flow.
+
+.Dl # rds-info -f
+.Dl 127.0.0.1 11111      127.0.0.1 22222          0
+.Dl ...
+
+.It Fl k
+Display all the RDS sockets in the system.  Each socket displays first the
+address and port it is bound to, if any, and then address and port that it is
+connected to, if any, and then the default send buffer size.  There will always
+be one socket listed that is neither bound to nor connected to any addresses --
+that is rds-info using an unbound socket to collect information.
+
+.Dl # rds-info -k
+.Dl 0.0.0.0     0        0.0.0.0     0     262144
+
+.It Fl n
+Display all RDS connections.  RDS connections are maintained between
+nodes by transports.  Each connection lists the local and remote addresses
+followed by the next sequence number that will be assigned to the next
+sent message.  Next comes the last sequence number that was received in
+an incoming message.  A series of flags indicates the status of the
+connection:
+
+.Bl -tag -width 4
+.It s
+A process is currently sending a message down the connection.
+.It c
+The transport is attempting to connect to the remote address.
+.It C
+The connection to the remote host is connected and active.
+.El
+
+.Dl # rds-info -n
+.Dl 127.0.0.1       127.0.0.1           499995           499995 scC
+.Dl ...
+
+.It Fl s
+Display all messages that are in the send queue on RDS connections.  Once
+messages are initially sent they move from the sent queue to the retransmit
+queue.  Each message includes its source and destination address and port,
+followed by its sequence number and the number of data bytes included in the
+message.
+
+.Dl # rds-info -s
+.Dl 127.0.0.1 11111 192.168.110.17 22222                0       4096
+.Dl ...
+
+.It Fl r
+Display all messages that are in the receive queue on RDS sockets.  This output
+matches the
+.Fl s
+option.
+
+.It Fl t
+Display all messages that are in the retransmit queue on RDS connections.  As
+a connection is re-established all of the messages in its retransmit queue
+are moved back to the send queue.
+This output matches the
+.Fl s
+option.
+.El
+.Pp

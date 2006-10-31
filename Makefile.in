@@ -1,0 +1,73 @@
+
+all: all-programs
+
+CFLAGS = -O2 -Wall
+CPPFLAGS = -DDEBUG_EXE -MD -MP -MF $(@D)/.$(basename $(@F)).d
+
+HEADERS = kernel-list.h rdstools.h pfhack.h
+COMMON_SOURCES = options.c stats.c pfhack.c
+SOURCES = $(addsuffix .c,$(PROGRAMS)) $(COMMON_SOURCES)
+CLEAN_OBJECTS = $(addsuffix .o,$(PROGRAMS)) $(subst .c,.o,$(COMMON_SOURCES))
+
+# This is the default
+DYNAMIC_PF_RDS = true
+
+ifneq ($(DYNAMIC_PF_RDS),)
+CPPFLAGS += -DDYNAMIC_PF_RDS
+COMMON_OBJECTS = $(subst .c,.o,$(COMMON_SOURCES))
+else
+COMMON_OBJECTS = $(subst .c,.o,$(filter-out pfhack.c,$(COMMON_SOURCES)))
+endif
+
+PROGRAMS = rds-gen rds-sink rds-info
+
+all-programs: $(PROGRAMS)
+
+clean:
+	rm -f $(PROGRAMS) $(CLEAN_OBJECTS)
+
+distclean: clean
+	rm -f .*.d
+
+
+
+$(PROGRAMS) : % : %.o $(COMMON_OBJECTS)
+	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+LOCAL_DFILES := $(wildcard .*.d)
+ifneq ($(LOCAL_DFILES),)
+.PHONY: $(LOCAL_DFILES)
+-include $(LOCAL_DFILES)
+endif
+
+#
+# this doesn't have proper deps for now so it requies some manual intervention
+# to remove the svn-rev and tar before building rpms
+#
+# use svn's notion of what's under revision control to figure out what
+# to include in the tarball to use when making an rpm.. the deps catch
+# generated files.
+VERSION := 1.0
+SVN_REV := @SVN_REV@
+TAR_PREFIX := rds-tools-$(VERSION)-$(SVN_REV)
+TAR_FILE := $(TAR_PREFIX).tar.gz
+$(TAR_FILE): Makefile rds-tools.spec svn-rev
+	@rm -rf $@ $(TAR_PREFIX) || :
+	@mkdir $(TAR_PREFIX)
+	for a in $^ `svn stat -v | awk '($$1 != "?"){print $4}'`; do    \
+		if [ ! -f $$a ]; then                                   \
+			continue;                                       \
+		fi;                                                     \
+		targ=$(TAR_PREFIX)/$$(dirname $$a);                     \
+		mkdir -p $$targ;                                        \
+		cp $$a $$targ;                                          \
+	done
+	tar -zcf $@ $(TAR_PREFIX)
+
+.PHONY: rpm
+rpm: $(TAR_FILE)
+	rpmbuild -ta $^
+
+.PHONY: dist
+dist: $(TAR_FILE)
+

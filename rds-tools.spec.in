@@ -1,0 +1,36 @@
+Summary: RDS support tools 
+Name: rds-tools
+Version: 1.0
+Release: @SVN_REV@
+License: GPL
+Group: Applications/Internet
+URL: http://oss.oracle.com/projects/rds/
+Source: rds-tools-%{version}-%{release}.tar.gz
+BuildRoot: /var/tmp/rds-tools-%{version}-%{release}
+
+%description
+rds-tools is a collection of support tools for the RDS socket API.
+
+%prep
+%setup -n rds-tools-%{version}-%{release}
+ 
+%build
+make
+
+%install
+
+mkdir -p $RPM_BUILD_ROOT/{%{_mandir}/man1,%{_bindir}}
+install -m 755 rds-info rds-gen rds-sink $RPM_BUILD_ROOT/%{_bindir}
+install -m 755 rds-info.1 rds-gen.1 rds-sink.1 $RPM_BUILD_ROOT/%{_mandir}/man1
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(-,root,root)
+%{_bindir}/*
+%{_mandir}/*
+
+%changelog
+* Mon Oct 27 2006 Zach Brown <zach.brown@oracle.com>
+- initial version

@@ -1,0 +1,9 @@
+
+== Short build instructions ==
+
+	autoconf
+	./configure
+	make rpm
+
+This should result in an rds-tools rpm which is versioned by the VERSION
+in the Makefile and the subversion rev that was checked out.

@@ -69,13 +69,10 @@ static int setup_alarm(void)
 	int rc = 0;
 	struct sigaction act;
 
-	act.sa_sigaction = NULL;
-	act.sa_restorer = NULL;
 	sigemptyset(&act.sa_mask);
 	act.sa_handler = handler;
-#ifdef SA_INTERRUPT
-	act.sa_flags = SA_INTERRUPT;
-#endif
+	act.sa_flags = 0;
+
 	rc = sigaction(SIGALRM, &act, NULL);
 	if (rc) {
 		rc = -errno;

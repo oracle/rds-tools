@@ -1,8 +1,8 @@
 Summary: RDS support tools 
 Name: rds-tools
-Version: 1.0
-Release: @SVN_REV@
-License: GPL
+Version: @VERSION@
+Release: @RELEASE@
+License: GPL/BSD
 Group: Applications/Internet
 URL: http://oss.oracle.com/projects/rds/
 Source: rds-tools-%{version}-%{release}.tar.gz

@@ -61,7 +61,8 @@ void print_usage(int rc)
 		 "	-n	connections\n"
 		 "	-r	recv queue messages\n"
 		 "	-s	send queue messages\n"
-		 "	-t	retransmit queue messages\n",
+		 "	-t	retransmit queue messages\n"
+		 "	-T	TCP transport sockets\n",
 		 progname);
 
 	exit(rc);
@@ -77,6 +78,7 @@ void print_version()
 #define RDS_INFO_RETRANS_MESSAGES       10004
 #define RDS_INFO_RECV_MESSAGES          10005
 #define RDS_INFO_SOCKETS                10006
+#define RDS_INFO_TCP_SOCKETS            10007
 
 struct rds_info_counter {
 	uint8_t		name[32];
@@ -110,6 +112,7 @@ struct rds_info_socket {
 	uint32_t	connected_addr;
 	uint16_t	bound_port;
 	uint16_t	connected_port;
+	uint32_t	rcvbuf;
 } __attribute__((packed));
 
 #define RDS_INFO_MESSAGE_FLAG_ACK               0x01
@@ -124,6 +127,20 @@ struct rds_info_message {
 	uint16_t	fport;
 	uint8_t		flags;
 } __attribute__((packed));
+
+struct rds_info_tcp_socket {
+	/* _addr and _port are network (big) endian */
+        uint32_t          local_addr;
+        uint16_t          local_port;
+        uint32_t          peer_addr;
+        uint16_t          peer_port;
+        uint64_t             hdr_rem;
+        uint64_t             data_rem;
+        uint32_t             last_sent_nxt;
+        uint32_t             last_expected_una;
+        uint32_t             last_seen_una;
+} __attribute__((packed));
+
 
 #define rds_conn_flag(conn, flag, letter) \
 	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
@@ -151,7 +168,7 @@ int main(int argc, char **argv)
 	int each;
 	int c;
 
-	while ((c = getopt(argc, argv, "+cfknrst")) != EOF) {
+	while ((c = getopt(argc, argv, "+cfknrstT")) != EOF) {
 		switch (c) {
 			case 'c':
 				info = RDS_INFO_COUNTERS;
@@ -173,6 +190,9 @@ int main(int argc, char **argv)
 				break;
 			case 't':
 				info = RDS_INFO_RETRANS_MESSAGES;
+				break;
+			case 'T':
+				info = RDS_INFO_TCP_SOCKETS;
 				break;
 			case '?':
 				verbosef(0, stderr,
@@ -253,9 +273,9 @@ int main(int argc, char **argv)
 			printf("%15s %5u", inet_ntoa(addr),
 			       ntohs(sk.bound_port));
 			addr.s_addr = sk.connected_addr;
-			printf("%15s %5u %10u\n",
+			printf("%15s %5u %10u %10u\n",
 				inet_ntoa(addr), ntohs(sk.connected_port),
-				sk.sndbuf);
+				sk.sndbuf, sk.rcvbuf);
 		}
 		break;
 	}
@@ -294,6 +314,23 @@ int main(int argc, char **argv)
 			printf("%15s %5u %16"PRIu64" %10u %c\n",
 				inet_ntoa(addr), ntohs(msg.fport), msg.seq,
 				msg.len, c);
+		}
+		break;
+	}
+
+	case RDS_INFO_TCP_SOCKETS: {
+		struct rds_info_tcp_socket ts;
+		struct in_addr addr;
+		
+		for_each(ts, data, each, len) {
+			addr.s_addr = ts.local_addr;
+			printf("%15s %5u", inet_ntoa(addr),
+				ntohs(ts.local_port));
+			addr.s_addr = ts.local_addr;
+			printf("%15s %5u %10"PRIu64" %10"PRIu64" %10u %10u\n",
+				inet_ntoa(addr), ntohs(ts.peer_port),
+				ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
+				ts.last_expected_una, ts.last_seen_una);
 		}
 		break;
 	}

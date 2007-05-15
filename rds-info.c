@@ -56,7 +56,6 @@ void print_usage(int rc)
 	verbosef(0, output,
 		 "Usage: %s [-c] [-s]\n"
 		 "	-c	statistic counters\n"
-		 "	-f	flows\n"
 		 "	-k	sockets\n"
 		 "	-n	connections\n"
 		 "	-r	recv queue messages\n"
@@ -73,7 +72,7 @@ void print_version()
 
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001
-#define RDS_INFO_FLOWS			10002
+//#define RDS_INFO_FLOWS			10002 /* no longer exist */
 #define RDS_INFO_SEND_MESSAGES		10003
 #define RDS_INFO_RETRANS_MESSAGES       10004
 #define RDS_INFO_RECV_MESSAGES          10005
@@ -96,14 +95,6 @@ struct rds_info_connection {
 	uint32_t	faddr;
 	uint8_t		transport[15];           /* null term ascii */
 	uint8_t		flags;
-} __attribute__((packed));
-
-struct rds_info_flow {
-	uint32_t	laddr;
-	uint32_t	faddr;
-	uint32_t	bytes;
-	uint16_t	lport;
-	uint16_t	fport;
 } __attribute__((packed));
 
 struct rds_info_socket {
@@ -168,13 +159,10 @@ int main(int argc, char **argv)
 	int each;
 	int c;
 
-	while ((c = getopt(argc, argv, "+cfknrstT")) != EOF) {
+	while ((c = getopt(argc, argv, "+cknrstT")) != EOF) {
 		switch (c) {
 			case 'c':
 				info = RDS_INFO_COUNTERS;
-				break;
-			case 'f':
-				info = RDS_INFO_FLOWS;
 				break;
 			case 'k':
 				info = RDS_INFO_SOCKETS;
@@ -276,21 +264,6 @@ int main(int argc, char **argv)
 			printf("%15s %5u %10u %10u\n",
 				inet_ntoa(addr), ntohs(sk.connected_port),
 				sk.sndbuf, sk.rcvbuf);
-		}
-		break;
-	}
-
-	case RDS_INFO_FLOWS: {
-		struct rds_info_flow flow;
-		struct in_addr addr;
-		
-		for_each(flow, data, each, len) {
-			addr.s_addr = flow.laddr;
-			printf("%15s %5u", inet_ntoa(addr), ntohs(flow.lport));
-			addr.s_addr = flow.faddr;
-			printf("%15s %5u %10u\n",
-				inet_ntoa(addr), ntohs(flow.fport),
-				flow.bytes);
 		}
 		break;
 	}

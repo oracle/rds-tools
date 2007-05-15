@@ -19,7 +19,7 @@ else
 COMMON_OBJECTS = $(subst .c,.o,$(filter-out pfhack.c,$(COMMON_SOURCES)))
 endif
 
-PROGRAMS = rds-gen rds-sink rds-info
+PROGRAMS = rds-gen rds-sink rds-info rds-stress
 
 all-programs: $(PROGRAMS)
 
@@ -49,6 +49,7 @@ TAR_FILE := $(TAR_PREFIX).tar.gz
 EXTRA_DIST := 	rds-info.1 \
 		rds-gen.1 \
 		rds-sink.1 \
+		rds-stress.1 \
 		Makefile.in \
 		rds-tools.spec.in \
 		configure.in \

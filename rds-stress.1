@@ -1,0 +1,117 @@
+.Dd May 15, 2007
+.Dt RDS-STRESS 1
+.Os
+.Sh NAME
+.Nm rds-stress
+.Nd send messages between processes over RDS sockets
+.Pp
+.Sh SYNOPSIS
+.Nm rds-stress
+.Bk -words
+.Op Fl p Ar port_number
+.Op Fl r Ar receive_address
+.Op Fl s Ar send_address
+.Op Fl a Ar ack_bytes
+.Op Fl q Ar request_bytes
+.Op Fl d Ar queue_depth
+.Op Fl t Ar nr_tasks
+.Op Fl c
+
+.Sh DESCRIPTION
+.Nm rds-stress
+rds-stress sends messages between groups tasks, usually running on seperate
+machines.
+.Pp
+First a passive receiving instance is started.  It only needs to be told
+what address and port to listen on.
+.Pp
+.Dl $ rds-stress -r recvhost -p 4000
+.Pp
+Then an active sending instance is started.  It is told what address and port
+to send from as well as the address and port at which it will find a listening
+passive receiver.  In addition, it is given configuration options which
+both instances will use.
+.Pp
+.Dl $ rds-stress -r sendhost -s recvhost -p 4000 -t 1 -d 1
+.Pp
+The active sender will parse the options, connect to the passive receiver, and
+send the options over this connection.  From this point on both instances
+exhibit the exact same behaviour.
+.Pp
+They will create a number of child tasks as specified by the -t option.  Once
+the children are created the parent sleeps for a second at a time, printing a
+summary of statistics at each interval. 
+.Pp
+Each child will open an RDS socket, each binding to a port number in order
+after the port number given on the command line.  The first child would bind to
+port 4001 in our example.  Each child sets the send and receive buffers to
+exactly fit the number of messages, requests and acks, that will be in flight
+as determind by the command line arguments.
+.Pp
+The children then enter their loop.  They will keep a number of sent messages
+outstanding as specified by the -d option.  When they reach this limit they
+will wait to receive acks which will allow them to send again.  As they receive
+messages from their peers they immediately send acks.
+.Pp
+Each child maintains outstanding messages to all other children of the other instance.  They do not send to their siblings.
+.Pp
+The following options are available for use on the command line:
+.Bl -tag -width Ds
+.It Fl p Ar port_number
+Each parent binds a TCP socket to this port number and their respective
+address.  They will trade the negotiated options over this socket.  Each
+child will bind an RDS socket to the range of ports immediately following
+this port number, for as many children as there are.
+.It Fl r Ar receive_address
+This specifies the address that messages will be sent from.  If -s is not 
+specified than rds-stress waits for a connection on this address before
+proceeding.
+.It Fl s Ar send_address
+A connection attempt is made to this address.  Once its complete and the
+options are sent over it then children will be created and work will proceed.
+.It Fl a Ar ack_bytes
+This specifies the size of the ack messages, in bytes.  There is a minimum size
+which depends on the format of the ack messages, which may change over time.
+.It Fl q Ar request_bytes
+This specifies the size of the request messages, in bytes.  It also has a minimum size which may change over time.
+.It Fl d Ar queue_depth
+Each child will try to maintain this many sent messages outstanding to each
+of its peers on the remote address.
+.It Fl t Ar nr_tasks
+Each parent will create this many children tasks.
+.It Fl c
+This causes rds-stress to create child tasks which just consume CPU cycles.
+One task is created for each CPU in the system.  First each child observes the
+maximum rate at which it can consume cycles.  This means that this option
+should only be given on an idle system.  rds-stress can then calculate the CPU
+use of the system by observing the lesser rate at which the children consume
+cycles.  This option is *not* shared between the active and passive instances.
+It must be specified on each rds-stress command line.
+.El
+.Pp
+
+.Sh OUTPUT
+Each parent outputs columns of statistics at a regular interval:
+.Bl -tag -width Ds
+.It tsks
+The number of child tasks which are running.
+.It tx/s
+The number of sendmsg() calls that all children are executing, per second. 
+.It tx+rx K/s
+The total number of bytes that are flowing through sendmsg() and recvmsg() for all children.  This includes both request and ack messages.
+.It tx us/c
+The average number of usecs spent in sendmsg() calls.
+.It rtt us
+The average round trip time for a request and ack message pair.  This measures
+the total time between when a task sends a request and when it finally receives
+the ack for that message.  Because it includes the time it takes for the
+receiver to wake up, receive the message, and send an ack, it can grow to be
+quite large under load. 
+.It cpu %
+This is the percentage of available CPU resources on this machine that are being
+consumed since rds-stress started running.  It will show -1.00 if -c is not
+given.  It is calculated based on the amount of CPU resources that CPU soaking
+tasks are able to consume.  This lets it measure CPU use by the system, say in
+interrupt handlers, that task-based CPU accounting does not include.
+For this to work rds-stress must be started with -c on an idle system.
+.El

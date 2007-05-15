@@ -20,8 +20,8 @@ make
 %install
 
 mkdir -p $RPM_BUILD_ROOT/{%{_mandir}/man1,%{_bindir}}
-install -m 755 rds-info rds-gen rds-sink $RPM_BUILD_ROOT/%{_bindir}
-install -m 755 rds-info.1 rds-gen.1 rds-sink.1 $RPM_BUILD_ROOT/%{_mandir}/man1
+install -m 755 rds-info rds-gen rds-sink rds-stress $RPM_BUILD_ROOT/%{_bindir}
+install -m 755 rds-info.1 rds-gen.1 rds-sink.1 rds-stress.1 $RPM_BUILD_ROOT/%{_mandir}/man1
 
 %clean
 rm -rf $RPM_BUILD_ROOT

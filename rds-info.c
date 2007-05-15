@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 			printf("%15s %5u", inet_ntoa(addr),
 				ntohs(ts.local_port));
 			addr.s_addr = ts.local_addr;
-			printf("%15s %5u %10"PRIu64" %10"PRIu64" %10u %10u\n",
+			printf("%15s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
 				inet_ntoa(addr), ntohs(ts.peer_port),
 				ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
 				ts.last_expected_una, ts.last_seen_una);

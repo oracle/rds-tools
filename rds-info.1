@@ -3,19 +3,21 @@
 .Os
 .Sh NAME
 .Nm rds-info
-.Nd display information about RDS on the system
+.Nd display information from the RDS kernel module
 .Pp
 .Sh SYNOPSIS
 .Nm rds-info
 .Bk -words
-.Op Fl cfknrst
+.Op Fl cknrstT
 
 .Sh DESCRIPTION
 The
 .Nm
 utility presents various sources of information that
-the RDS subsystem maintains.  The options specify which
-information source to display.  Only one may be specified.
+the RDS kernel module maintains.  When run without any optional arguments
+.Nm
+will output all the information it knows of.  When options are specified then
+only the information associated with those options is displayed.
 
 The options are as follows:
 .Bl -tag -width Ds
@@ -24,40 +26,53 @@ Display global counters.  Each counter increments as its event
 occurs.  The counters may not be reset.  The set of supported counters
 may change over time.
 
-.Dl # /var/zab/rds-tools/rds-info -c
-.Dl ack_entry_hit            : 0
-.Dl ...
-
-.It Fl f
-Display all the flows in the system.  When a message is queued for
-transmission on a socket it creates a flow from its source address
-and port to its destination address and port.  Each flow is displayed
-on one line.  Following its source and destination address and ports is
-the number of bytes that are queued for transmission in messages on
-that flow.
-
-.Dl # rds-info -f
-.Dl 127.0.0.1 11111      127.0.0.1 22222          0
-.Dl ...
+.Bl -tag -width 4
+.It CounterName
+The name of the counter.  These names come from the kernel and can change
+depending on the capability of the kernel module.
+.It Value
+The number of times that the counter has been incremented since the kernel
+module was loaded.
+.El
 
 .It Fl k
-Display all the RDS sockets in the system.  Each socket displays first the
-address and port it is bound to, if any, and then address and port that it is
-connected to, if any, and then the default send buffer size.  There will always
-be one socket listed that is neither bound to nor connected to any addresses --
-that is rds-info using an unbound socket to collect information.
+Display all the RDS sockets in the system.  There will always be one socket
+listed that is neither bound to nor connected to any addresses because
+.Nm
+itself uses an unbound socket to collect information.
 
-.Dl # rds-info -k
-.Dl 0.0.0.0     0        0.0.0.0     0     262144
+.Bl -tag -width 4
+.It BoundAddr, BPort
+The IP address and port that the socket is bound to.  0.0.0.0 0 indicates that
+the socket has not been bound.
+.It ConnAddr, CPort
+The IP address and port that the socket is connected to.  0.0.0.0 0 indicates
+that the socket has not been connected.
+.It SndBuf, RcvBuf
+The number of bytes of message payload which can be queued for sending or
+receiving on the socket, respectively.
+.El
 
 .It Fl n
 Display all RDS connections.  RDS connections are maintained between
-nodes by transports.  Each connection lists the local and remote addresses
-followed by the next sequence number that will be assigned to the next
-sent message.  Next comes the last sequence number that was received in
-an incoming message.  A series of flags indicates the status of the
-connection:
+nodes by transports.  
 
+.Bl -tag -width 4
+.It LocalAddr
+The IP address of this node.  For connections that originate and terminate on
+the same node the local address indicates which address initiated the
+connection establishment.
+.It RemoteAddr
+The IP address of the remote end of the connection.  
+.It NextTX
+The sequence number that will be given to the next message that is sent
+over the connection.
+.It NextRX
+The sequence number that is expected from the next message to arrive over
+the connection.  Any incoming messages with sequence numbers less than this
+will be dropped.
+.It Flg
+Flags which indicate the state of the connection. 
 .Bl -tag -width 4
 .It s
 A process is currently sending a message down the connection.
@@ -66,34 +81,54 @@ The transport is attempting to connect to the remote address.
 .It C
 The connection to the remote host is connected and active.
 .El
+.El
 
-.Dl # rds-info -n
-.Dl 127.0.0.1       127.0.0.1           499995           499995 scC
-.Dl ...
+.It Fl r, Fl s, Fl t
+Display the messages in the receive, send, or retransmit queues respectively.
+.Bl -tag -width 4
+.It LocalAddr, LPort
+The local IP address and port on this node associated with the message. For
+sent messages this is the source address, for receive messages it is the
+destination address.
+.It RemoteAddr, RPort
+The remote IP address and port associated with the message. For sent messages
+this is the destination address, for receive messages it is the source address.
+.It Seq
+The sequence number of the message.
+.It Bytes
+The number of bytes in the message payload.
+.El
 
-.It Fl s
-Display all messages that are in the send queue on RDS connections.  Once
-messages are initially sent they move from the sent queue to the retransmit
-queue.  Each message includes its source and destination address and port,
-followed by its sequence number and the number of data bytes included in the
-message.
+The following information sources are dependent on specific transports which
+may not always be available. 
 
-.Dl # rds-info -s
-.Dl 127.0.0.1 11111 192.168.110.17 22222                0       4096
-.Dl ...
+.It Fl T
+Display the TCP sockets which the TCP transport is using to provide
+RDS connections.
 
-.It Fl r
-Display all messages that are in the receive queue on RDS sockets.  This output
-matches the
-.Fl s
-option.
+.Bl -tag -width 4
+.It LocalAddr, LPort
+The local IP address and port of this socket.
+.It RemoteAddr, RPort
+The remote IP address and port that this socket is connected to.
+.It HdrRemain
+The number of bytes that must be read off the socket to complete the next
+full RDS header.
+.It DataRemain
+The number of bytes that must be read off the socket to complete the data
+payload of the message which is being received.
+.It SentNxt
+The TCP sequence number of the first byte of the last message that we sent
+down the connection.
+.It ExpectedUna
+The TCP sequence number of the byte past the last byte of the last message
+that we sent down the connection.  When we see that the remote side has
+acked up to this byte then we know that the remote side has received all
+our RDS messages.
+.It SeenUna
+The TCP sequence number of the byte past the last byte which has been
+acked by the remote host.
+.El
 
-.It Fl t
-Display all messages that are in the retransmit queue on RDS connections.  As
-a connection is re-established all of the messages in its retransmit queue
-are moved back to the send queue.
-This output matches the
-.Fl s
-option.
 .El
 .Pp

@@ -41,6 +41,7 @@ struct options {
 	uint16_t	starting_port;
 	uint16_t	nr_tasks;
 	uint32_t	run_time;
+	uint8_t		summary_only;
 } __attribute__((packed));
 
 struct counter {
@@ -173,6 +174,7 @@ static void usage(void)
 	"\n"
 	"Optional behavioural flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
+	" -z                print a summary at end of test only\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress -r recv -p 4000\n"
@@ -590,6 +592,18 @@ void stat_snapshot(struct counter *disp, struct child_control *ctl,
 	}
 }
 
+void stat_accumulate(struct counter *accum, const struct counter *cur)
+{
+	uint16_t s;
+
+	for (s = 0; s < NR_STATS; ++s, ++cur, ++accum) {
+		accum->nr += cur->nr;
+		accum->sum += cur->sum;
+		accum->min = minz(accum->min, cur->min);
+		accum->max = max(accum->max, cur->max);
+	}
+}
+
 void stat_total(struct counter *disp, struct child_control *ctl,
 		uint16_t nr_tasks)
 {
@@ -659,6 +673,7 @@ static void release_children_and_wait(struct options *opts,
 				      struct soak_control *soak_arr)
 {
 	struct counter disp[NR_STATS];
+	struct counter summary[NR_STATS];
 	struct timeval start, end, now, first_ts, last_ts;
 	uint16_t i;
 	uint16_t nr_running;
@@ -689,6 +704,7 @@ static void release_children_and_wait(struct options *opts,
 	}
 
 	nr_running = opts->nr_tasks;
+	memset(summary, 0, sizeof(summary));
 
 	printf("%4s %6s %10s %7s %8s %5s\n",
 		"tsks", "tx/s", "tx+rx K/s", "tx us/c", "rtt us", "cpu %");
@@ -701,7 +717,7 @@ static void release_children_and_wait(struct options *opts,
 		stat_snapshot(disp, ctl, nr_running);
 		gettimeofday(&now, NULL);
 
-		{
+		if (!opts->summary_only) {
 			double scale;
 
 			/* Every loop takes a little more than one second;
@@ -710,7 +726,6 @@ static void release_children_and_wait(struct options *opts,
 			 * as possible, and scale all values by its inverse.
 			 */
 			scale = 1e6 / usec_sub(&now, &last_ts);
-			last_ts = now;
 
 			printf("%4u %6"PRIu64" %10.2f %7.2f %8.2f %5.2f\n",
 				nr_running,
@@ -720,6 +735,9 @@ static void release_children_and_wait(struct options *opts,
 				scale * avg(&disp[S_RTT_USECS]),
 				scale * cpu_use(soak_arr));
 		}
+
+		stat_accumulate(summary, disp);
+		last_ts = now;
 
 		if (timerisset(&end)) {
 			if (timercmp(&now, &end, >=)) {
@@ -738,7 +756,21 @@ static void release_children_and_wait(struct options *opts,
 		nr_running--;
 
 	stat_total(disp, ctl, opts->nr_tasks);
-	printf("request sent: %"PRIu64"\n", disp[S_REQ_TX_BYTES].nr);
+	if (!opts->summary_only)
+		printf("---------------------------------------------\n");
+	{
+		double scale;
+
+		scale = 1e6 / usec_sub(&last_ts, &first_ts);
+
+		printf("%4u %6lu %10.2f %7.2f %8.2f %5.2f  (average)\n",
+			opts->nr_tasks,
+			(long) (scale * summary[S_REQ_TX_BYTES].nr),
+			scale * throughput(summary) / 1024.0,
+			avg(&summary[S_SENDMSG_USECS]),
+			avg(&summary[S_RTT_USECS]),
+			-1.0);
+	}
 }	
 
 static int active_parent(struct options *opts, struct soak_control *soak_arr)
@@ -928,11 +960,12 @@ int main(int argc, char **argv)
 	opts.ack_size = MIN_MSG_BYTES;
 	opts.req_size = 1024;
 	opts.run_time = 0;
+	opts.summary_only = 0;
 
         while(1) {
 		int c;
 
-                c = getopt(argc, argv, "+a:cd:hp:q:r:s:t:T:");
+                c = getopt(argc, argv, "+a:cd:hp:q:r:s:t:T:z");
                 if (c == -1)
                         break;
 
@@ -965,6 +998,9 @@ int main(int argc, char **argv)
                                 break;
 			case 'T':
 				opts.run_time = parse_ull(optarg, (uint32_t)~0);
+				break;
+			case 'z':
+				opts.summary_only = 1;
 				break;
                         case 'h':
                         case '?':

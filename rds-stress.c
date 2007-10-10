@@ -659,7 +659,7 @@ static void release_children_and_wait(struct options *opts,
 				      struct soak_control *soak_arr)
 {
 	struct counter disp[NR_STATS];
-	struct timeval start, end, now;
+	struct timeval start, end, now, last_ts;
 	uint16_t i;
 	uint16_t nr_running;
 
@@ -668,6 +668,7 @@ static void release_children_and_wait(struct options *opts,
 	for (i = 0; i < opts->nr_tasks; i++)
 		ctl[i].start = start;
 
+	gettimeofday(&last_ts, NULL);
 	if (opts->run_time) {
 		end = start;
 		end.tv_sec += opts->run_time;
@@ -681,21 +682,33 @@ static void release_children_and_wait(struct options *opts,
 		"tsks", "tx/s", "tx+rx K/s", "tx us/c", "rtt us", "cpu %");
 
 	while (nr_running) {
-		/* XXX big bug, need to mark some ctl elements dead */
-		stat_snapshot(disp, ctl, nr_running);
-
 		sleep(1);
 
-		printf("%4u %6"PRIu64" %10.2f %7.2f %8.2f %5.2f\n",
-			nr_running,
-			disp[S_REQ_TX_BYTES].nr,
-			throughput(disp) / 1024.0,
-			avg(&disp[S_SENDMSG_USECS]),
-			avg(&disp[S_RTT_USECS]),
-			cpu_use(soak_arr));
+		/* XXX big bug, need to mark some ctl elements dead */
+		stat_snapshot(disp, ctl, nr_running);
+		gettimeofday(&now, NULL);
+
+		{
+			double scale;
+
+			/* Every loop takes a little more than one second;
+			 * and system load can actually introduce latencies.
+			 * So try to measure the actual time elapsed as precise
+			 * as possible, and scale all values by its inverse.
+			 */
+			scale = 1e6 / usec_sub(&now, &last_ts);
+			last_ts = now;
+
+			printf("%4u %6"PRIu64" %10.2f %7.2f %8.2f %5.2f\n",
+				nr_running,
+				disp[S_REQ_TX_BYTES].nr,
+				scale * throughput(disp) / 1024.0,
+				scale * avg(&disp[S_SENDMSG_USECS]),
+				scale * avg(&disp[S_RTT_USECS]),
+				scale * cpu_use(soak_arr));
+		}
 
 		if (timerisset(&end)) {
-			gettimeofday(&now, NULL);
 			if (timercmp(&now, &end, >=)) {
 				for (i = 0; i < opts->nr_tasks; i++)
 					kill(ctl[i].pid, SIGTERM);

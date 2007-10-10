@@ -421,20 +421,23 @@ static int send_ack(int fd, struct task *t, char *buf,
 	return ret;
 }
 
-static int recv_one(int fd, struct task *tasks, char *buf,
+static int recv_one(int fd, struct task *tasks,
 	       	struct options *opts,
 		struct child_control *ctl)
 {
+	char buf[max(opts->req_size, opts->ack_size)];
 	struct sockaddr_in sin;
 	struct header hdr, *in_hdr;
 	socklen_t socklen;
-	struct timeval stop;
+	struct timeval tstamp;
 	struct task *t;
-	int ret, i;
+	int ret, task_index;
 
 	socklen = sizeof(struct sockaddr_in);
 	ret = recvfrom(fd, buf, max(opts->req_size, opts->ack_size), 0,
 			     (struct sockaddr *) &sin, &socklen);
+	gettimeofday(&tstamp, NULL);
+
 	if (ret < 0)
 		return ret;
 	if (ret < sizeof(struct header))
@@ -463,8 +466,10 @@ static int recv_one(int fd, struct task *tasks, char *buf,
 	}
 
 	/* check the incoming sequence number */
-	i = ntohs(sin.sin_port) - opts->starting_port - 1;
-	t = &tasks[i];
+	task_index = ntohs(sin.sin_port) - opts->starting_port - 1;
+	if (task_index >= opts->nr_tasks)
+		die("received bad task index %u\n", task_index);
+	t = &tasks[task_index];
 
 	/*
 	 * Verify that the incoming header indicates that this
@@ -478,19 +483,18 @@ static int recv_one(int fd, struct task *tasks, char *buf,
 	hdr.to_addr = t->src_addr.sin_addr.s_addr;
 	hdr.to_port = t->src_addr.sin_port;
 
-	if (hdr.op == OP_ACK) {
-		gettimeofday(&stop, NULL);
-		stat_inc(&ctl->cur[S_RTT_USECS],
-			 usec_sub(&stop,
-		&t->send_time[t->recv_seq % opts->req_depth]));
-	}
-
-	t->recv_seq++;
-
 	if (check_hdr(buf, ret, &hdr))
 		die("header from %s:%u to id %u bogus\n",
 		    inet_ntoa(sin.sin_addr), htons(sin.sin_port),
 		    ntohs(t->src_addr.sin_port));
+
+	if (hdr.op == OP_ACK) {
+		stat_inc(&ctl->cur[S_RTT_USECS],
+			 usec_sub(&tstamp,
+		&t->send_time[t->recv_seq % opts->req_depth]));
+	}
+
+	t->recv_seq++;
 
 	if (hdr.op == OP_ACK) {
 		t->pending -= 1;
@@ -564,7 +568,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		 * an ack clears space for us to send again or we recv
 		 * a message.
 		 */
-		ret = recv_one(fd, tasks, buf, opts, ctl);
+		ret = recv_one(fd, tasks, opts, ctl);
 		if (ret < 0)
 			die_errno("sendto() returned %zd", ret);
 	}

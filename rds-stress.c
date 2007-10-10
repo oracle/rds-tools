@@ -353,6 +353,45 @@ struct task {
 	struct timeval *	send_time;
 };
 
+static int send_one(int fd, struct task *t, char *buf,
+	       	struct options *opts,
+		struct child_control *ctl)
+{
+	struct header hdr;
+	struct timeval start;
+	struct timeval stop;
+	int ret;
+
+	hdr.op = OP_REQ;
+	hdr.seq = htonl(t->send_seq);
+	hdr.from_addr = t->src_addr.sin_addr.s_addr;
+	hdr.from_port = t->src_addr.sin_port;
+	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
+	hdr.to_port = t->dst_addr.sin_port;
+
+	fill_hdr(buf, opts->req_size, &hdr);
+
+	gettimeofday(&start, NULL);
+	t->send_time[t->send_seq % opts->req_depth] = start;
+	ret = sendto(fd, buf, opts->req_size, 0,
+		     (struct sockaddr *) &t->dst_addr,
+		     sizeof(t->dst_addr));
+	gettimeofday(&stop, NULL);
+	if (ret < 0)
+		return ret;
+
+	if (ret != opts->req_size)
+		die_errno("sendto() truncated - %zd", ret);
+
+	stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
+	stat_inc(&ctl->cur[S_SENDMSG_USECS],
+		 usec_sub(&stop, &start));
+
+	t->pending++;
+	t->send_seq++;
+	return ret;
+}
+
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct options *opts, uint16_t id)
 {
@@ -407,37 +446,11 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 		/* keep the pipeline full */
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
-			if (t->pending == opts->req_depth)
-				continue;
-
-			hdr.op = OP_REQ;
-			hdr.seq = htonl(t->send_seq);
-			hdr.from_addr = t->src_addr.sin_addr.s_addr;
-			hdr.from_port = t->src_addr.sin_port;
-			hdr.to_addr = t->dst_addr.sin_addr.s_addr;
-			hdr.to_port = t->dst_addr.sin_port;
-
-			fill_hdr(buf, opts->req_size, &hdr);
-
-			gettimeofday(&start, NULL);
-			t->send_time[t->send_seq % opts->req_depth] = start;
-			ret = sendto(fd, buf, opts->req_size, 0,
-				     (struct sockaddr *) &t->dst_addr,
-				     sizeof(t->dst_addr));
-			gettimeofday(&stop, NULL);
-			if (ret != opts->req_size)
-				die_errno("sendto() returned %zd", ret);
-
-			stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
-			stat_inc(&ctl->cur[S_SENDMSG_USECS], 
-				 usec_sub(&stop, &start));
-
-			t->pending++;
-			t->send_seq++;
-
-			/* spaghetti code */
-			i = -1;
-			t = tasks - 1;
+			while (t->pending < opts->req_depth) {
+				ret = send_one(fd, t, buf, opts, ctl);
+				if (ret < 0)
+					die_errno("sendto() returned %zd", ret);
+			}
 		}
 
 		/* 

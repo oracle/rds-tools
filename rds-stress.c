@@ -659,7 +659,7 @@ static void release_children_and_wait(struct options *opts,
 				      struct soak_control *soak_arr)
 {
 	struct counter disp[NR_STATS];
-	struct timeval start, end, now, last_ts;
+	struct timeval start, end, now, first_ts, last_ts;
 	uint16_t i;
 	uint16_t nr_running;
 
@@ -668,9 +668,21 @@ static void release_children_and_wait(struct options *opts,
 	for (i = 0; i < opts->nr_tasks; i++)
 		ctl[i].start = start;
 
-	gettimeofday(&last_ts, NULL);
+	/* Allow for a 4 second delay: 2 seconds for the children
+	 * to come up, and 2 more of burn-in time
+	 */
+	printf("Starting up"); fflush(stdout);
+	for (i = 0; i < 4; ++i) {
+		sleep(1);
+		stat_snapshot(disp, ctl, opts->nr_tasks);
+		printf(".");
+		fflush(stdout);
+	}
+	printf("\n");
+
+	gettimeofday(&first_ts, NULL);
 	if (opts->run_time) {
-		end = start;
+		end = first_ts;
 		end.tv_sec += opts->run_time;
 	} else {
 		timerclear(&end);
@@ -681,6 +693,7 @@ static void release_children_and_wait(struct options *opts,
 	printf("%4s %6s %10s %7s %8s %5s\n",
 		"tsks", "tx/s", "tx+rx K/s", "tx us/c", "rtt us", "cpu %");
 
+	last_ts = first_ts;
 	while (nr_running) {
 		sleep(1);
 

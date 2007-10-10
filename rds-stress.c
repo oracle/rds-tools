@@ -40,6 +40,7 @@ struct options {
 	uint32_t	receive_addr;
 	uint16_t	starting_port;
 	uint16_t	nr_tasks;
+	uint32_t	run_time;
 } __attribute__((packed));
 
 struct counter {
@@ -67,6 +68,7 @@ enum {
  * simply.
  */
 struct child_control {
+	pid_t pid;
 	int ready;
 	struct timeval start;
 	struct counter cur[NR_STATS];
@@ -167,6 +169,7 @@ static void usage(void)
 	" -q [bytes, 1024]  request message length\n"
 	" -d [depth, 1]     request pipeline depth, nr outstanding\n"
 	" -t [nr, 1]        number of child tasks\n"
+	" -T [seconds, 0]   runtime of test, 0 means infinite\n"
 	"\n"
 	"Optional behavioural flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
@@ -534,6 +537,7 @@ static struct child_control *start_children(struct options *opts)
 			run_child(parent, ctl + i, opts, i);
 			exit(0);
 		}
+		ctl[i].pid = pid;
 	}
 
 	for (i = 0; i < opts->nr_tasks; i++) {
@@ -624,14 +628,38 @@ static double cpu_use(struct soak_control *soak_arr)
 	return (double)(capacity - soaked) * 100 / (double)capacity;
 }
 
+static int reap_one_child(int wflags)
+{
+	pid_t pid;
+	int status;
+
+	pid = waitpid(-1, &status, wflags);
+	if (pid < 0)
+		die("waitpid returned %u", pid);
+	if (pid == 0)
+		return 0;
+
+	if (WIFEXITED(status)) {
+		if (WEXITSTATUS(status) == 0)
+			return 1;
+		die("child pid %u exited with status %d\n",
+				pid, WEXITSTATUS(status));
+	}
+	if (WIFSIGNALED(status)) {
+		if (WTERMSIG(status) == SIGTERM)
+			return 1;
+		die("child pid %u exited with signal %d\n",
+				pid, WTERMSIG(status));
+	}
+	die("child pid %u wait status %d\n", pid, status);
+}
+
 static void release_children_and_wait(struct options *opts,
 				      struct child_control *ctl,
 				      struct soak_control *soak_arr)
 {
 	struct counter disp[NR_STATS];
-	struct timeval start;
-	int status;
-	pid_t pid;
+	struct timeval start, end, now;
 	uint16_t i;
 	uint16_t nr_running;
 
@@ -639,6 +667,13 @@ static void release_children_and_wait(struct options *opts,
 	start.tv_sec += 2;
 	for (i = 0; i < opts->nr_tasks; i++)
 		ctl[i].start = start;
+
+	if (opts->run_time) {
+		end = start;
+		end.tv_sec += opts->run_time;
+	} else {
+		timerclear(&end);
+	}
 
 	nr_running = opts->nr_tasks;
 
@@ -659,22 +694,24 @@ static void release_children_and_wait(struct options *opts,
 			avg(&disp[S_RTT_USECS]),
 			cpu_use(soak_arr));
 
-		/* see if any children have finished or died */
-		pid = waitpid(-1, &status, WNOHANG);
-		if (pid < 0)
-			die("waitpid returned %u", pid);
-		if (pid == 0)
-			continue;
-		if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-			nr_running--;
-			continue;
+		if (timerisset(&end)) {
+			gettimeofday(&now, NULL);
+			if (timercmp(&now, &end, >=)) {
+				for (i = 0; i < opts->nr_tasks; i++)
+					kill(ctl[i].pid, SIGTERM);
+				break;
+			}
 		}
 
-		die("child pid %u exited with status %d\n",
-		    pid, WEXITSTATUS(status));
+		/* see if any children have finished or died */
+		if (reap_one_child(WNOHANG))
+			nr_running--;
 	}
 
-	stat_total(disp, ctl, nr_running);
+	while (nr_running && reap_one_child(0))
+		nr_running--;
+
+	stat_total(disp, ctl, opts->nr_tasks);
 	printf("request sent: %"PRIu64"\n", disp[S_REQ_TX_BYTES].nr);
 }	
 
@@ -864,11 +901,12 @@ int main(int argc, char **argv)
 
 	opts.ack_size = MIN_MSG_BYTES;
 	opts.req_size = 1024;
+	opts.run_time = 0;
 
         while(1) {
 		int c;
 
-                c = getopt(argc, argv, "+a:cd:hp:q:r:s:t:");
+                c = getopt(argc, argv, "+a:cd:hp:q:r:s:t:T:");
                 if (c == -1)
                         break;
 
@@ -899,6 +937,9 @@ int main(int argc, char **argv)
 				opts.nr_tasks = parse_ull(optarg,
 							  (uint16_t)~0);
                                 break;
+			case 'T':
+				opts.run_time = parse_ull(optarg, (uint32_t)~0);
+				break;
                         case 'h':
                         case '?':
                         default:

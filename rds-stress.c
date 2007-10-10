@@ -101,6 +101,7 @@ struct header {
 	uint32_t	to_addr;
 	uint16_t	from_port;
 	uint16_t	to_port;
+	uint16_t	index;
 	uint8_t		op;
 	uint8_t		data[0];
 } __attribute__((packed));
@@ -241,6 +242,7 @@ static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
 			" from_port %15u %s %15u\n"
 			"   to_addr %15s %s %15s\n"
 			"   to_port %15u %s %15u\n"
+			"     index %15u %s %15u\n"
 			"        op %15u %s %15u\n",
 			off[i],
 			bleh(seq, ntohl),
@@ -248,6 +250,7 @@ static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
 			bleh(from_port, ntohs),
 			bleh(to_addr, inet_ntoa_32),
 			bleh(to_port, ntohs),
+			bleh(index, ntohs),
 			bleh(op, (uint8_t)));
 #undef bleh
 
@@ -350,10 +353,13 @@ struct task {
 	struct sockaddr_in	dst_addr;
 	uint32_t		send_seq;
 	uint32_t		recv_seq;
+	uint16_t		send_index;
+	uint16_t		recv_index;
 	struct timeval *	send_time;
 };
 
-static int send_packet(int fd, struct task *t, unsigned int op, unsigned int size)
+static int send_packet(int fd, struct task *t, unsigned int op,
+		unsigned int qindex, unsigned int size)
 {
 	unsigned char buf[size];
 	struct header hdr;
@@ -365,6 +371,7 @@ static int send_packet(int fd, struct task *t, unsigned int op, unsigned int siz
 	hdr.from_port = t->src_addr.sin_port;
 	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
 	hdr.to_port = t->dst_addr.sin_port;
+	hdr.index = htons(qindex);
 
 	fill_hdr(buf, size, &hdr);
 
@@ -386,29 +393,30 @@ static int send_one(int fd, struct task *t,
 	int ret;
 
 	gettimeofday(&start, NULL);
-	ret = send_packet(fd, t, OP_REQ, opts->req_size);
+	ret = send_packet(fd, t, OP_REQ, t->send_index, opts->req_size);
 	gettimeofday(&stop, NULL);
 
 	if (ret < 0)
 		return ret;
 
-	t->send_time[t->send_seq % opts->req_depth] = start;
+	t->send_time[t->send_index] = start;
 	stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
 	stat_inc(&ctl->cur[S_SENDMSG_USECS],
 		 usec_sub(&stop, &start));
 
+	t->send_index = (t->send_index + 1) % opts->req_depth;
 	t->pending++;
 	return ret;
 }
 
-static int send_ack(int fd, struct task *t,
+static int send_ack(int fd, struct task *t, unsigned int qindex,
 		struct options *opts,
 		struct child_control *ctl)
 {
 	int ret;
 
 	/* send an ack in response to the req we just got */
-	ret = send_packet(fd, t, OP_ACK, opts->ack_size);
+	ret = send_packet(fd, t, OP_ACK, qindex, opts->ack_size);
 	if (ret < 0)
 		return ret;
 	if (ret != opts->ack_size)
@@ -428,6 +436,7 @@ static int recv_one(int fd, struct task *tasks,
 	socklen_t socklen;
 	struct timeval tstamp;
 	struct task *t;
+	uint16_t expect_index;
 	int ret, task_index;
 
 	socklen = sizeof(struct sockaddr_in);
@@ -443,6 +452,12 @@ static int recv_one(int fd, struct task *tasks,
 		die("socklen = %d < sizeof(sin) (%zu)\n",
 		    socklen, sizeof(struct sockaddr_in));
 
+	/* check the incoming sequence number */
+	task_index = ntohs(sin.sin_port) - opts->starting_port - 1;
+	if (task_index >= opts->nr_tasks)
+		die("received bad task index %u\n", task_index);
+	t = &tasks[task_index];
+
 	/* make sure the incoming message's size matches is op */
 	in_hdr = (void *)buf;
 	switch(in_hdr->op) {
@@ -451,22 +466,20 @@ static int recv_one(int fd, struct task *tasks,
 		if (ret != opts->req_size)
 			die("req size %zd, not %u\n", ret,
 			    opts->req_size);
+		expect_index = t->recv_index;
 		break;
 	case OP_ACK:
 		stat_inc(&ctl->cur[S_ACK_RX_BYTES], ret);
 		if (ret != opts->ack_size)
 			die("ack size %zd, not %u\n", ret,
 			    opts->ack_size);
+
+		/* This ACK should be for the oldest outstanding REQ */
+		expect_index = (t->send_index - t->pending + opts->req_depth) % opts->req_depth;
 		break;
 	default:
 		die("unknown op %u\n", in_hdr->op);
 	}
-
-	/* check the incoming sequence number */
-	task_index = ntohs(sin.sin_port) - opts->starting_port - 1;
-	if (task_index >= opts->nr_tasks)
-		die("received bad task index %u\n", task_index);
-	t = &tasks[task_index];
 
 	/*
 	 * Verify that the incoming header indicates that this
@@ -479,6 +492,7 @@ static int recv_one(int fd, struct task *tasks,
 	hdr.from_port = sin.sin_port;
 	hdr.to_addr = t->src_addr.sin_addr.s_addr;
 	hdr.to_port = t->src_addr.sin_port;
+	hdr.index = htons(expect_index);
 
 	if (check_hdr(buf, ret, &hdr))
 		die("header from %s:%u to id %u bogus\n",
@@ -487,12 +501,11 @@ static int recv_one(int fd, struct task *tasks,
 
 	if (hdr.op == OP_ACK) {
 		stat_inc(&ctl->cur[S_RTT_USECS],
-			 usec_sub(&tstamp,
-		&t->send_time[t->recv_seq % opts->req_depth]));
-
+			 usec_sub(&tstamp, &t->send_time[t->recv_index]));
 		t->pending -= 1;
 	} else {
-		ret = send_ack(fd, t, opts, ctl);
+		ret = send_ack(fd, t, t->recv_index, opts, ctl);
+		t->recv_index = (t->recv_index + 1) % opts->req_depth;
 	}
 	t->recv_seq++;
 

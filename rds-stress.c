@@ -17,6 +17,7 @@
 #include <inttypes.h>
 #include <syscall.h>
 #include <sys/stat.h>
+#include <sys/poll.h>
 #include <fcntl.h>
 
 /*
@@ -344,11 +345,14 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 		die("getsockopt(RCVBUF) returned %d, we need %d * 2\n",
 			val, bytes);
 
+	fcntl(fd, F_SETFL, O_NONBLOCK);
+
 	return fd;
 }
 
 struct task {
 	unsigned int		pending;
+	unsigned int		unacked;
 	struct sockaddr_in	src_addr;	/* same for all tasks */
 	struct sockaddr_in	dst_addr;
 	uint32_t		send_seq;
@@ -378,8 +382,13 @@ static int send_packet(int fd, struct task *t, unsigned int op,
 	ret = sendto(fd, buf, size, 0,
 		     (struct sockaddr *) &t->dst_addr,
 		     sizeof(t->dst_addr));
-	if (ret >= 0 && ret != size)
-		die_errno("sendto() truncated - %zd", ret);
+	if (ret < 0) {
+		if (errno != EAGAIN)
+			die_errno("sendto() failed");
+		return ret;
+	}
+	if (ret != size)
+		die("sendto() truncated - %zd", ret);
 	t->send_seq++;
 	return ret;
 }
@@ -504,7 +513,7 @@ static int recv_one(int fd, struct task *tasks,
 			 usec_sub(&tstamp, &t->send_time[t->recv_index]));
 		t->pending -= 1;
 	} else {
-		ret = send_ack(fd, t, t->recv_index, opts, ctl);
+		t->unacked += 1;
 		t->recv_index = (t->recv_index + 1) % opts->req_depth;
 	}
 	t->recv_seq++;
@@ -517,6 +526,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 {
 	char parent_proc[PATH_MAX];
 	struct sockaddr_in sin;
+	struct pollfd pfd;
 	int fd;
 	uint16_t i;
 	ssize_t ret;
@@ -554,28 +564,46 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 	sin.sin_family = AF_INET;
 
+	pfd.fd = fd;
+	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
 
 		check_parent(parent_proc, parent_pid);
 
-		/* keep the pipeline full */
-		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
-			while (t->pending < opts->req_depth) {
-				ret = send_one(fd, t, opts, ctl);
-				if (ret < 0)
-					die_errno("sendto() returned %zd", ret);
-			}
+		ret = poll(&pfd, 1, -1);
+		if (ret < 0)
+			die_errno("poll failed");
+
+		pfd.events = POLLIN;
+
+		if (pfd.revents & POLLIN) {
+			while (recv_one(fd, tasks, opts, ctl) >= 0)
+				;
 		}
 
-		/* 
-		 * we've filled the pipeline, so block receiving until
-		 * an ack clears space for us to send again or we recv
-		 * a message.
-		 */
-		ret = recv_one(fd, tasks, opts, ctl);
-		if (ret < 0)
-			die_errno("sendto() returned %zd", ret);
+		/* keep the pipeline full */
+		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
+			while (t->unacked) {
+				uint16_t qindex;
+
+				qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
+				ret = send_ack(fd, t, qindex, opts, ctl);
+				if (ret < 0) {
+					pfd.events = POLLOUT;
+					goto sendq_full;
+				}
+				t->unacked -= 1;
+			}
+			while (t->pending < opts->req_depth) {
+				ret = send_one(fd, t, opts, ctl);
+				if (ret < 0) {
+					pfd.events = POLLOUT;
+					goto sendq_full;
+				}
+			}
+		}
+sendq_full: ;
 	}
 }
 

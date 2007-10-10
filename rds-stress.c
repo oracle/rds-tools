@@ -353,65 +353,62 @@ struct task {
 	struct timeval *	send_time;
 };
 
-static int send_one(int fd, struct task *t, char *buf,
-	       	struct options *opts,
-		struct child_control *ctl)
+static int send_packet(int fd, struct task *t, unsigned int op, unsigned int size)
 {
+	unsigned char buf[size];
 	struct header hdr;
-	struct timeval start;
-	struct timeval stop;
 	int ret;
 
-	hdr.op = OP_REQ;
+	hdr.op = op;
 	hdr.seq = htonl(t->send_seq);
 	hdr.from_addr = t->src_addr.sin_addr.s_addr;
 	hdr.from_port = t->src_addr.sin_port;
 	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
 	hdr.to_port = t->dst_addr.sin_port;
 
-	fill_hdr(buf, opts->req_size, &hdr);
+	fill_hdr(buf, size, &hdr);
 
-	gettimeofday(&start, NULL);
-	t->send_time[t->send_seq % opts->req_depth] = start;
-	ret = sendto(fd, buf, opts->req_size, 0,
+	ret = sendto(fd, buf, size, 0,
 		     (struct sockaddr *) &t->dst_addr,
 		     sizeof(t->dst_addr));
+	if (ret >= 0 && ret != size)
+		die_errno("sendto() truncated - %zd", ret);
+	t->send_seq++;
+	return ret;
+}
+
+static int send_one(int fd, struct task *t,
+		struct options *opts,
+		struct child_control *ctl)
+{
+	struct timeval start;
+	struct timeval stop;
+	int ret;
+
+	gettimeofday(&start, NULL);
+	ret = send_packet(fd, t, OP_REQ, opts->req_size);
 	gettimeofday(&stop, NULL);
+
 	if (ret < 0)
 		return ret;
 
-	if (ret != opts->req_size)
-		die_errno("sendto() truncated - %zd", ret);
-
+	t->send_time[t->send_seq % opts->req_depth] = start;
 	stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
 	stat_inc(&ctl->cur[S_SENDMSG_USECS],
 		 usec_sub(&stop, &start));
 
 	t->pending++;
-	t->send_seq++;
 	return ret;
 }
 
-static int send_ack(int fd, struct task *t, char *buf,
+static int send_ack(int fd, struct task *t,
 		struct options *opts,
 		struct child_control *ctl)
 {
-	struct header hdr;
 	int ret;
 
 	/* send an ack in response to the req we just got */
-	hdr.op = OP_ACK;
-	hdr.seq = htonl(t->send_seq);
-	hdr.from_addr = t->src_addr.sin_addr.s_addr;
-	hdr.from_port = t->src_addr.sin_port;
-	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
-	hdr.to_port = t->dst_addr.sin_port;
-
-	fill_hdr(buf, opts->ack_size, &hdr);
-
-	ret = sendto(fd, buf, opts->ack_size, 0,
-		     (struct sockaddr *) &t->dst_addr,
-		     sizeof(t->dst_addr));
+	ret = send_packet(fd, t, OP_ACK, opts->ack_size);
 	if (ret < 0)
 		return ret;
 	if (ret != opts->ack_size)
@@ -492,16 +489,12 @@ static int recv_one(int fd, struct task *tasks,
 		stat_inc(&ctl->cur[S_RTT_USECS],
 			 usec_sub(&tstamp,
 		&t->send_time[t->recv_seq % opts->req_depth]));
-	}
 
-	t->recv_seq++;
-
-	if (hdr.op == OP_ACK) {
 		t->pending -= 1;
 	} else {
-		ret = send_ack(fd, t, buf, opts, ctl);
-		t->send_seq++;
+		ret = send_ack(fd, t, opts, ctl);
 	}
+	t->recv_seq++;
 
 	return ret;
 }
@@ -513,7 +506,6 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	struct sockaddr_in sin;
 	int fd;
 	uint16_t i;
-	char buf[max(opts->req_size, opts->ack_size)];
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
 	struct timeval start;
@@ -557,7 +549,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		/* keep the pipeline full */
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
 			while (t->pending < opts->req_depth) {
-				ret = send_one(fd, t, buf, opts, ctl);
+				ret = send_one(fd, t, opts, ctl);
 				if (ret < 0)
 					die_errno("sendto() returned %zd", ret);
 			}

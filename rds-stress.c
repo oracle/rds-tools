@@ -952,6 +952,10 @@ int main(int argc, char **argv)
 	struct options opts;
 	struct soak_control *soak_arr = NULL;
 
+	/* We really want to see output when we redirect
+	 * stdout to a pipe. */
+	setlinebuf(stdout);
+
 	memset(&opts, 0xff, sizeof(opts));
 
 	if (argc == 1)

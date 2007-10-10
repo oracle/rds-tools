@@ -344,6 +344,15 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 	return fd;
 }
 
+struct task {
+	unsigned int		pending;
+	struct sockaddr_in	src_addr;	/* same for all tasks */
+	struct sockaddr_in	dst_addr;
+	uint32_t		send_seq;
+	uint32_t		recv_seq;
+	struct timeval *	send_time;
+};
+
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct options *opts, uint16_t id)
 {
@@ -356,20 +365,22 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	socklen_t socklen;
 	struct header hdr;
 	struct header *in_hdr;
-	uint32_t depth[opts->nr_tasks];
-	uint32_t send_seq[opts->nr_tasks];
-	uint32_t recv_seq[opts->nr_tasks];
-	struct timeval send_time[opts->nr_tasks][opts->req_depth];
+	struct task tasks[opts->nr_tasks];
 	struct timeval start;
 	struct timeval stop;
-
-	memset(depth, 0, sizeof(depth));
-	memset(send_seq, 0, sizeof(send_seq));
-	memset(recv_seq, 0, sizeof(recv_seq));
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port + 1 + id);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
+
+	memset(tasks, 0, sizeof(tasks));
+	for (i = 0; i < opts->nr_tasks; i++) {
+		tasks[i].src_addr = sin;
+		tasks[i].dst_addr.sin_family = AF_INET;
+		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
+		tasks[i].dst_addr.sin_port = htons(opts->starting_port + 1 + i);
+		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
+	}
 
 	fd = rds_socket(opts, &sin);
 
@@ -390,29 +401,29 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	sin.sin_family = AF_INET;
 
 	while (1) {
+		struct task *t;
+
 		check_parent(parent_proc, parent_pid);
 
 		/* keep the pipeline full */
-		for (i = 0; i < opts->nr_tasks; i++) {
-			if (depth[i] == opts->req_depth)
+		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
+			if (t->pending == opts->req_depth)
 				continue;
 
-			sin.sin_addr.s_addr = htonl(opts->send_addr);
-			sin.sin_port = htons(opts->starting_port + 1 + i);
-
 			hdr.op = OP_REQ;
-			hdr.seq = htonl(send_seq[i]);
-			hdr.from_addr = htonl(opts->receive_addr);
-			hdr.from_port = htons(opts->starting_port + 1 + id);
-			hdr.to_addr = sin.sin_addr.s_addr;
-			hdr.to_port = sin.sin_port;
+			hdr.seq = htonl(t->send_seq);
+			hdr.from_addr = t->src_addr.sin_addr.s_addr;
+			hdr.from_port = t->src_addr.sin_port;
+			hdr.to_addr = t->dst_addr.sin_addr.s_addr;
+			hdr.to_port = t->dst_addr.sin_port;
 
 			fill_hdr(buf, opts->req_size, &hdr);
 
 			gettimeofday(&start, NULL);
-			send_time[i][send_seq[i] % opts->req_depth] = start;
+			t->send_time[t->send_seq % opts->req_depth] = start;
 			ret = sendto(fd, buf, opts->req_size, 0,
-				     (struct sockaddr *)&sin, sizeof(sin));
+				     (struct sockaddr *) &t->dst_addr,
+				     sizeof(t->dst_addr));
 			gettimeofday(&stop, NULL);
 			if (ret != opts->req_size)
 				die_errno("sendto() returned %zd", ret);
@@ -421,9 +432,12 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 			stat_inc(&ctl->cur[S_SENDMSG_USECS], 
 				 usec_sub(&stop, &start));
 
-			depth[i]++;
-			send_seq[i]++;
-			i = -1; /* start over */
+			t->pending++;
+			t->send_seq++;
+
+			/* spaghetti code */
+			i = -1;
+			t = tasks - 1;
 		}
 
 		/* 
@@ -462,6 +476,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 		/* check the incoming sequence number */
 		i = ntohs(sin.sin_port) - opts->starting_port - 1;
+		t = &tasks[i];
 			
 		/*
 		 * Verify that the incoming header indicates that this 
@@ -469,20 +484,20 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		 * op.
 		 */
 		hdr.op = in_hdr->op;
-		hdr.seq = htonl(recv_seq[i]);
+		hdr.seq = htonl(t->recv_seq);
 		hdr.from_addr = sin.sin_addr.s_addr;
 		hdr.from_port = sin.sin_port;
-		hdr.to_addr = htonl(opts->receive_addr);
-		hdr.to_port = htons(opts->starting_port + 1 + id);
+		hdr.to_addr = t->src_addr.sin_addr.s_addr;
+		hdr.to_port = t->src_addr.sin_port;
 
 		if (hdr.op == OP_ACK) {
 			gettimeofday(&stop, NULL);
 			stat_inc(&ctl->cur[S_RTT_USECS], 
 				 usec_sub(&stop,
-			&send_time[i][recv_seq[i] % opts->req_depth]));
+			&t->send_time[t->recv_seq % opts->req_depth]));
 		}
 
-		recv_seq[i]++;
+		t->recv_seq++;
 
 		if (check_hdr(buf, ret, &hdr))
 			die("header from %s:%u to id %u bogus\n",
@@ -490,28 +505,29 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 			    id);
 
 		if (hdr.op == OP_ACK) {
-			depth[i]--;
+			t->pending -= 1;
 			continue;
 		}
 
 		/* send an ack in response to the req we just got */
 		hdr.op = OP_ACK;
-		hdr.seq = htonl(send_seq[i]);
-		hdr.from_addr = htonl(opts->receive_addr);
-		hdr.from_port = htons(opts->starting_port + 1 + id);
-		hdr.to_addr = sin.sin_addr.s_addr;
-		hdr.to_port = sin.sin_port;
+		hdr.seq = htonl(t->send_seq);
+		hdr.from_addr = t->src_addr.sin_addr.s_addr;
+		hdr.from_port = t->src_addr.sin_port;
+		hdr.to_addr = t->dst_addr.sin_addr.s_addr;
+		hdr.to_port = t->dst_addr.sin_port;
 
 		fill_hdr(buf, opts->ack_size, &hdr);
 
 		ret = sendto(fd, buf, opts->ack_size, 0,
-			     (struct sockaddr *)&sin, sizeof(sin));
+			     (struct sockaddr *) &t->dst_addr,
+			     sizeof(t->dst_addr));
 		if (ret != opts->ack_size)
 			die_errno("sendto() returned %zd", ret);
 
 		stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
 
-		send_seq[i]++;
+		t->send_seq++;
 	}
 }
 

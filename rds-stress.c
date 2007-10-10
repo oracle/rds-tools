@@ -392,6 +392,116 @@ static int send_one(int fd, struct task *t, char *buf,
 	return ret;
 }
 
+static int send_ack(int fd, struct task *t, char *buf,
+		struct options *opts,
+		struct child_control *ctl)
+{
+	struct header hdr;
+	int ret;
+
+	/* send an ack in response to the req we just got */
+	hdr.op = OP_ACK;
+	hdr.seq = htonl(t->send_seq);
+	hdr.from_addr = t->src_addr.sin_addr.s_addr;
+	hdr.from_port = t->src_addr.sin_port;
+	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
+	hdr.to_port = t->dst_addr.sin_port;
+
+	fill_hdr(buf, opts->ack_size, &hdr);
+
+	ret = sendto(fd, buf, opts->ack_size, 0,
+		     (struct sockaddr *) &t->dst_addr,
+		     sizeof(t->dst_addr));
+	if (ret < 0)
+		return ret;
+	if (ret != opts->ack_size)
+		die_errno("sendto() returned %zd", ret);
+
+	stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
+	return ret;
+}
+
+static int recv_one(int fd, struct task *tasks, char *buf,
+	       	struct options *opts,
+		struct child_control *ctl)
+{
+	struct sockaddr_in sin;
+	struct header hdr, *in_hdr;
+	socklen_t socklen;
+	struct timeval stop;
+	struct task *t;
+	int ret, i;
+
+	socklen = sizeof(struct sockaddr_in);
+	ret = recvfrom(fd, buf, max(opts->req_size, opts->ack_size), 0,
+			     (struct sockaddr *) &sin, &socklen);
+	if (ret < 0)
+		return ret;
+	if (ret < sizeof(struct header))
+		die("recvfrom() returned short data: %zd", ret);
+	if (socklen < sizeof(struct sockaddr_in))
+		die("socklen = %d < sizeof(sin) (%zu)\n",
+		    socklen, sizeof(struct sockaddr_in));
+
+	/* make sure the incoming message's size matches is op */
+	in_hdr = (void *)buf;
+	switch(in_hdr->op) {
+	case OP_REQ:
+		stat_inc(&ctl->cur[S_REQ_RX_BYTES], ret);
+		if (ret != opts->req_size)
+			die("req size %zd, not %u\n", ret,
+			    opts->req_size);
+		break;
+	case OP_ACK:
+		stat_inc(&ctl->cur[S_ACK_RX_BYTES], ret);
+		if (ret != opts->ack_size)
+			die("ack size %zd, not %u\n", ret,
+			    opts->ack_size);
+		break;
+	default:
+		die("unknown op %u\n", in_hdr->op);
+	}
+
+	/* check the incoming sequence number */
+	i = ntohs(sin.sin_port) - opts->starting_port - 1;
+	t = &tasks[i];
+
+	/*
+	 * Verify that the incoming header indicates that this
+	 * is the next in-order message to us.  We can't predict
+	 * op.
+	 */
+	hdr.op = in_hdr->op;
+	hdr.seq = htonl(t->recv_seq);
+	hdr.from_addr = sin.sin_addr.s_addr;
+	hdr.from_port = sin.sin_port;
+	hdr.to_addr = t->src_addr.sin_addr.s_addr;
+	hdr.to_port = t->src_addr.sin_port;
+
+	if (hdr.op == OP_ACK) {
+		gettimeofday(&stop, NULL);
+		stat_inc(&ctl->cur[S_RTT_USECS],
+			 usec_sub(&stop,
+		&t->send_time[t->recv_seq % opts->req_depth]));
+	}
+
+	t->recv_seq++;
+
+	if (check_hdr(buf, ret, &hdr))
+		die("header from %s:%u to id %u bogus\n",
+		    inet_ntoa(sin.sin_addr), htons(sin.sin_port),
+		    ntohs(t->src_addr.sin_port));
+
+	if (hdr.op == OP_ACK) {
+		t->pending -= 1;
+	} else {
+		ret = send_ack(fd, t, buf, opts, ctl);
+		t->send_seq++;
+	}
+
+	return ret;
+}
+
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct options *opts, uint16_t id)
 {
@@ -401,12 +511,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	uint16_t i;
 	char buf[max(opts->req_size, opts->ack_size)];
 	ssize_t ret;
-	socklen_t socklen;
-	struct header hdr;
-	struct header *in_hdr;
 	struct task tasks[opts->nr_tasks];
 	struct timeval start;
-	struct timeval stop;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port + 1 + id);
@@ -432,7 +538,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		sleep(1);
 	}
 
-	/* sleep until we're supposed to start */ 
+	/* sleep until we're supposed to start */
 	gettimeofday(&start, NULL);
 	if (tv_cmp(&start, &ctl->start) < 0)
 		usleep(usec_sub(&ctl->start, &start));
@@ -458,89 +564,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		 * an ack clears space for us to send again or we recv
 		 * a message.
 		 */
-		socklen = sizeof(struct sockaddr_in);
-		ret = recvfrom(fd, buf, max(opts->req_size, opts->ack_size), 0, 
-			     (struct sockaddr *)&sin, &socklen);
-		if (ret < sizeof(struct header))
-			die_errno("recvfrom() returned %zd", ret);
-		if (socklen < sizeof(struct sockaddr_in))
-			die("socklen = %d < sizeof(sin) (%zu)\n",
-			    socklen, sizeof(struct sockaddr_in));
-
-
-		/* make sure the incoming message's size matches is op */
-		in_hdr = (void *)buf;
-		switch(in_hdr->op) {
-		case OP_REQ:
-			stat_inc(&ctl->cur[S_REQ_RX_BYTES], ret);
-			if (ret != opts->req_size)
-				die("req size %zd, not %u\n", ret,
-				    opts->req_size);
-			break;
-		case OP_ACK:
-			stat_inc(&ctl->cur[S_ACK_RX_BYTES], ret);
-			if (ret != opts->ack_size)
-				die("ack size %zd, not %u\n", ret,
-				    opts->ack_size);
-			break;
-		default:
-			die("unknown op %u\n", in_hdr->op);
-		}
-
-		/* check the incoming sequence number */
-		i = ntohs(sin.sin_port) - opts->starting_port - 1;
-		t = &tasks[i];
-			
-		/*
-		 * Verify that the incoming header indicates that this 
-		 * is the next in-order message to us.  We can't predict
-		 * op.
-		 */
-		hdr.op = in_hdr->op;
-		hdr.seq = htonl(t->recv_seq);
-		hdr.from_addr = sin.sin_addr.s_addr;
-		hdr.from_port = sin.sin_port;
-		hdr.to_addr = t->src_addr.sin_addr.s_addr;
-		hdr.to_port = t->src_addr.sin_port;
-
-		if (hdr.op == OP_ACK) {
-			gettimeofday(&stop, NULL);
-			stat_inc(&ctl->cur[S_RTT_USECS], 
-				 usec_sub(&stop,
-			&t->send_time[t->recv_seq % opts->req_depth]));
-		}
-
-		t->recv_seq++;
-
-		if (check_hdr(buf, ret, &hdr))
-			die("header from %s:%u to id %u bogus\n",
-			    inet_ntoa(sin.sin_addr), htons(sin.sin_port),
-			    id);
-
-		if (hdr.op == OP_ACK) {
-			t->pending -= 1;
-			continue;
-		}
-
-		/* send an ack in response to the req we just got */
-		hdr.op = OP_ACK;
-		hdr.seq = htonl(t->send_seq);
-		hdr.from_addr = t->src_addr.sin_addr.s_addr;
-		hdr.from_port = t->src_addr.sin_port;
-		hdr.to_addr = t->dst_addr.sin_addr.s_addr;
-		hdr.to_port = t->dst_addr.sin_port;
-
-		fill_hdr(buf, opts->ack_size, &hdr);
-
-		ret = sendto(fd, buf, opts->ack_size, 0,
-			     (struct sockaddr *) &t->dst_addr,
-			     sizeof(t->dst_addr));
-		if (ret != opts->ack_size)
+		ret = recv_one(fd, tasks, buf, opts, ctl);
+		if (ret < 0)
 			die_errno("sendto() returned %zd", ret);
-
-		stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
-
-		t->send_seq++;
 	}
 }
 

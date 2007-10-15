@@ -19,7 +19,7 @@
 
 .Sh DESCRIPTION
 .Nm rds-stress
-rds-stress sends messages between groups tasks, usually running on seperate
+sends messages between groups tasks, usually running on seperate
 machines.
 .Pp
 First a passive receiving instance is started.  It only needs to be told
@@ -53,8 +53,15 @@ outstanding as specified by the -d option.  When they reach this limit they
 will wait to receive acks which will allow them to send again.  As they receive
 messages from their peers they immediately send acks.
 .Pp
-Each child maintains outstanding messages to all other children of the other instance.  They do not send to their siblings.
+Every second, the parent process will display statistics of the ongoing
+stress test. The output is described in section OUTPUT below.
 .Pp
+If the -T option is given, the test will terminate after the specified time,
+and a summary is printed.
+.Pp
+Each child maintains outstanding messages to all other children of the other instance.
+They do not send to their siblings.
+.Sh OPTIONS
 The following options are available for use on the command line:
 .Bl -tag -width Ds
 .It Fl p Ar port_number
@@ -73,12 +80,21 @@ options are sent over it then children will be created and work will proceed.
 This specifies the size of the ack messages, in bytes.  There is a minimum size
 which depends on the format of the ack messages, which may change over time.
 .It Fl q Ar request_bytes
-This specifies the size of the request messages, in bytes.  It also has a minimum size which may change over time.
+This specifies the size of the request messages, in bytes.
+It also has a minimum size which may change over time.
 .It Fl d Ar queue_depth
 Each child will try to maintain this many sent messages outstanding to each
 of its peers on the remote address.
 .It Fl t Ar nr_tasks
 Each parent will create this many children tasks.
+.It Fl T Ar seconds
+Specify the duration of the test run. After the specified number of seconds,
+all processes on both ends of the connection will terminate, and the
+active instance will print a summary. By default, rds-stress will keep
+on sending and receiving messages.
+.It Fl z
+This flag can be used in conjunction with -T. It suppresses the ongoing
+display of statistics, and print a summary only.
 .It Fl c
 This causes rds-stress to create child tasks which just consume CPU cycles.
 One task is created for each CPU in the system.  First each child observes the

@@ -938,17 +938,40 @@ static void release_children_and_wait(struct options *opts,
 			avg(&summary[S_RTT_USECS]),
 			soak_arr? scale * cpu_total : -1.0);
 	}
-}	
+}
+
+static void peer_send(int fd, const void *ptr, size_t size)
+{
+	ssize_t ret;
+
+	while (size) {
+		ret = write(fd, ptr, size);
+		if (ret < 0)
+			die_errno("Cannot send to peer");
+		size -= ret;
+		ptr += ret;
+	}
+}
+
+static void peer_recv(int fd, void *ptr, size_t size)
+{
+	ssize_t ret;
+
+	while (size) {
+		ret = read(fd, ptr, size);
+		if (ret < 0)
+			die_errno("Cannot recv from peer");
+		size -= ret;
+		ptr += ret;
+	}
+}
 
 static int active_parent(struct options *opts, struct soak_control *soak_arr)
 {
 	struct child_control *ctl;
 	struct sockaddr_in sin;
 	int fd;
-	ssize_t ret;
 	uint8_t ok;
-
-	ctl = start_children(opts);
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port);
@@ -969,15 +992,20 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	printf("connected to %s:%u\n", inet_ntoa(sin.sin_addr),
 		ntohs(sin.sin_port));
 
-	ret = write(fd, opts, sizeof(struct options));
-	if (ret != sizeof(struct options))
-		die_errno("option write returned %zd", ret);
-
-	ret = read(fd, &ok, sizeof(ok));
-	if (ret != sizeof(ok))
-		die_errno("ok read returned %zd", ret);
+	/* "negotiation" is overstating things a bit :-)
+	 * We just tell the peer what options to use.
+	 */
+	peer_send(fd, opts, sizeof(struct options));
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
+	ctl = start_children(opts);
+
+	/* Tell the peer to start up. This is necessary when testing
+	 * with a large number of tasks, because otherwise the peer
+	 * may start sending before we have all our tasks running.
+	 */
+	peer_send(fd, &ok, sizeof(ok));
+	peer_recv(fd, &ok, sizeof(ok));
 
 	release_children_and_wait(opts, ctl, soak_arr);
 
@@ -992,7 +1020,6 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	struct sockaddr_in sin;
 	socklen_t socklen;
 	int lfd, fd;
-	ssize_t ret;
 	uint8_t ok;
 
 	sin.sin_family = AF_INET;
@@ -1015,11 +1042,9 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	printf("accepted connection from %s:%u\n", inet_ntoa(sin.sin_addr),
 		ntohs(sin.sin_port));
 
-	ret = read(fd, opts, sizeof(struct options));
-	if (ret != sizeof(struct options))
-		die_errno("remote option read returned %zd\n", ret);
+	peer_recv(fd, opts, sizeof(struct options));
 
-	/* 
+	/*
 	 * The sender gave us their send and receive addresses, we need
 	 * to swap them.
 	 */
@@ -1028,12 +1053,11 @@ static int passive_parent(uint32_t addr, uint16_t port,
 
 	ctl = start_children(opts);
 
-	ret = write(fd, &ok, sizeof(ok));
-	if (ret != sizeof(ok))
-		die_errno("remote option read returned %zd\n", ret);
+	/* Wait for "GO" from the initiating peer */
+	peer_recv(fd, &ok, sizeof(ok));
+	peer_send(fd, &ok, sizeof(ok));
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
-
 	release_children_and_wait(opts, ctl, soak_arr);
 
 	return 0;

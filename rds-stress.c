@@ -649,7 +649,19 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
 			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
 				pfd.events |= POLLOUT;
-				break;
+
+				/* Unfortunately there is no way how we can
+				 * tell the difference between the send queue
+				 * being full, and a particular destination
+				 * being congested.  In the former case,
+				 * there's no point in trying other destinations;
+				 * in the latter case we certainly want to try
+				 * sending to other tasks.
+				 *
+				 * It would be nice if we could map the congestion
+				 * map into user space :-)
+				 */
+				continue;
 			}
 		}
 	}

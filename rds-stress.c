@@ -78,11 +78,14 @@ struct child_control {
 } __attribute__((aligned (256))); /* arbitrary */
 
 struct soak_control {
+	pid_t		pid;
 	uint64_t	per_sec;
 	uint64_t	counter;
 	uint64_t	last;
 	struct timeval	start;
 } __attribute__((aligned (256))); /* arbitrary */
+
+void stop_soakers(struct soak_control *soak_arr);
 
 /*
  * Requests tend to be larger and we try to keep a certain number of them
@@ -835,11 +838,15 @@ static void release_children_and_wait(struct options *opts,
 			if (timercmp(&now, &end, >=)) {
 				for (i = 0; i < opts->nr_tasks; i++)
 					kill(ctl[i].pid, SIGTERM);
+				stop_soakers(soak_arr);
 				break;
 			}
 		}
 
-		/* see if any children have finished or died */
+		/* see if any children have finished or died.
+		 * This is a bit touchy - we should really be
+		 * able to tell an exited soaker from an exiting
+		 * RDS child. */
 		if (reap_one_child(WNOHANG))
 			nr_running--;
 	}
@@ -1025,9 +1032,22 @@ struct soak_control *start_soakers(void)
 			run_soaker(parent, soak_arr + i);
 			exit(0);
 		}
+		soak_arr[i].pid = pid;
 	}
 
 	return soak_arr;
+}
+
+void stop_soakers(struct soak_control *soak_arr)
+{
+	unsigned int i, nr_soak = sysconf(_SC_NPROCESSORS_ONLN);
+
+	if (!soak_arr)
+		return;
+	for (i = 0; i < nr_soak; ++i) {
+		kill(soak_arr[i].pid, SIGTERM);
+		waitpid(soak_arr[i].pid, NULL, 0);
+	}
 }
 
 void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,

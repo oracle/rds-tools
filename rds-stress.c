@@ -465,7 +465,8 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 
 static int send_anything(int fd, struct task *t,
 			struct options *opts,
-		struct child_control *ctl)
+			struct child_control *ctl,
+			int can_send)
 {
 	int ret;
 
@@ -474,12 +475,16 @@ static int send_anything(int fd, struct task *t,
 			uint16_t qindex;
 
 			qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
+			if (!can_send)
+				goto eagain;
 			ret = send_ack(fd, t, qindex, opts, ctl);
 			if (ret < 0)
 				return -1;
 			t->unacked -= 1;
 		}
 		if (t->pending < opts->req_depth) {
+			if (!can_send)
+				goto eagain;
 			ret = send_one(fd, t, opts, ctl);
 			if (ret < 0)
 				return -1;
@@ -487,6 +492,10 @@ static int send_anything(int fd, struct task *t,
 	}
 
 	return 0;
+
+eagain:
+	errno = EAGAIN;
+	return -1;
 }
 
 static int recv_one(int fd, struct task *tasks,
@@ -620,6 +629,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
+		int can_send;
 
 		check_parent(parent_pid);
 
@@ -635,8 +645,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		}
 
 		/* keep the pipeline full */
+		can_send = !!(pfd.revents & POLLOUT);
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
-			if (send_anything(fd, t, opts, ctl) < 0) {
+			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
 				pfd.events |= POLLOUT;
 				break;
 			}

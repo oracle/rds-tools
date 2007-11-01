@@ -16,6 +16,7 @@
 .Op Fl d Ar queue_depth
 .Op Fl t Ar nr_tasks
 .Op Fl c
+.Op Fl R
 
 .Sh DESCRIPTION
 .Nm rds-stress
@@ -103,6 +104,11 @@ should only be given on an idle system.  rds-stress can then calculate the CPU
 use of the system by observing the lesser rate at which the children consume
 cycles.  This option is *not* shared between the active and passive instances.
 It must be specified on each rds-stress command line.
+.It Fl R
+This tells the rds-stress parent process to run with SCHED_RR priority,
+giving it precedence over the child processes. This is useful when running
+with lots of tasks, where there is a risk of the child processes starving
+the parent, and skewing the results.
 .El
 .Pp
 

@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/poll.h>
 #include <fcntl.h>
+#include <sched.h>
 
 /*
  *
@@ -43,6 +44,7 @@ struct options {
 	uint16_t	nr_tasks;
 	uint32_t	run_time;
 	uint8_t		summary_only;
+	uint8_t		rtprio;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -192,6 +194,17 @@ static void usage(void)
 	"\n", (int) MIN_MSG_BYTES);
 
 	exit(2);
+}
+
+static void set_rt_priority(void)
+{
+	struct sched_param	param;
+
+	memset(&param, 0, sizeof(param));
+	param.sched_priority = 1;
+
+	if (sched_setscheduler(0, SCHED_RR, &param) < 0)
+		die_errno("sched_setscheduler(SCHED_RR) failed");
 }
 
 /* This hack lets children notice when their parents die.
@@ -817,6 +830,9 @@ static void release_children_and_wait(struct options *opts,
 	printf("%4s %6s %10s %7s %8s %5s\n",
 		"tsks", "tx/s", "tx+rx K/s", "tx us/c", "rtt us", "cpu %");
 
+	if (opts->rtprio)
+		set_rt_priority();
+
 	last_ts = first_ts;
 	while (nr_running) {
 		double cpu;
@@ -1096,7 +1112,7 @@ int main(int argc, char **argv)
         while(1) {
 		int c;
 
-                c = getopt(argc, argv, "+a:cd:hp:q:r:s:t:T:z");
+                c = getopt(argc, argv, "+a:cd:hp:q:Rr:s:t:T:z");
                 if (c == -1)
                         break;
 
@@ -1117,6 +1133,9 @@ int main(int argc, char **argv)
                         case 'q':
 				opts.req_size = parse_ull(optarg, (uint32_t)~0);
                                 break;
+			case 'R':
+				opts.rtprio = 1;
+				break;
                         case 'r':
 				opts.receive_addr = parse_addr(optarg);
                                 break;

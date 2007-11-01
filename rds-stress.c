@@ -43,6 +43,11 @@ struct options {
 	uint16_t	nr_tasks;
 	uint32_t	run_time;
 	uint8_t		summary_only;
+
+	/* At 1024 tasks, printing warnings about
+	 * setsockopt(SNDBUF) allocation is rather
+	 * slow. Cut that */
+	uint8_t		suppress_warnings;
 } __attribute__((packed));
 
 struct counter {
@@ -337,15 +342,17 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 	optlen = sizeof(val);
 	if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &val, &optlen))
 		die_errno("getsockopt(SNDBUF) failed");
-	if (val / 2 < bytes) 
-		die("getsockopt(SNDBUF) returned %d, we wanted %d * 2\n",
+	if (val / 2 < bytes && !opts->suppress_warnings)
+		fprintf(stderr,
+			"getsockopt(SNDBUF) returned %d, we wanted %d * 2\n",
 			val, bytes);
 
 	optlen = sizeof(val);
 	if (getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &val, &optlen))
 		die_errno("getsockopt(RCVBUF) failed");
-	if (val /2 < bytes) 
-		die("getsockopt(RCVBUF) returned %d, we need %d * 2\n",
+	if (val / 2 < bytes && !opts->suppress_warnings)
+		fprintf(stderr,
+			"getsockopt(RCVBUF) returned %d, we need %d * 2\n",
 			val, bytes);
 
 	fcntl(fd, F_SETFL, O_NONBLOCK);
@@ -632,6 +639,7 @@ static struct child_control *start_children(struct options *opts)
 		if (pid == -1)
 			die_errno("forking child nr %u failed", i);
 		if (pid == 0) {
+			opts->suppress_warnings = (i > 0);
 			run_child(parent, ctl + i, opts, i);
 			exit(0);
 		}

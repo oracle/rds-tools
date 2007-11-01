@@ -463,8 +463,34 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 	return ret;
 }
 
+static int send_anything(int fd, struct task *t,
+			struct options *opts,
+		struct child_control *ctl)
+{
+	int ret;
+
+	while (t->unacked || t->pending < opts->req_depth) {
+		if (t->unacked) {
+			uint16_t qindex;
+
+			qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
+			ret = send_ack(fd, t, qindex, opts, ctl);
+			if (ret < 0)
+				return -1;
+			t->unacked -= 1;
+		}
+		if (t->pending < opts->req_depth) {
+			ret = send_one(fd, t, opts, ctl);
+			if (ret < 0)
+				return -1;
+		}
+	}
+
+	return 0;
+}
+
 static int recv_one(int fd, struct task *tasks,
-	       	struct options *opts,
+			struct options *opts,
 		struct child_control *ctl)
 {
 	char buf[max(opts->req_size, opts->ack_size)];
@@ -610,26 +636,11 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 		/* keep the pipeline full */
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
-			while (t->unacked) {
-				uint16_t qindex;
-
-				qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
-				ret = send_ack(fd, t, qindex, opts, ctl);
-				if (ret < 0) {
-					pfd.events = POLLOUT;
-					goto sendq_full;
-				}
-				t->unacked -= 1;
-			}
-			while (t->pending < opts->req_depth) {
-				ret = send_one(fd, t, opts, ctl);
-				if (ret < 0) {
-					pfd.events = POLLOUT;
-					goto sendq_full;
-				}
+			if (send_anything(fd, t, opts, ctl) < 0) {
+				pfd.events |= POLLOUT;
+				break;
 			}
 		}
-sendq_full: ;
 	}
 }
 

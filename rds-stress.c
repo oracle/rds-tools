@@ -770,7 +770,8 @@ static void release_children_and_wait(struct options *opts,
 	struct counter disp[NR_STATS];
 	struct counter summary[NR_STATS];
 	struct timeval start, end, now, first_ts, last_ts;
-	uint16_t i;
+	double cpu_total = 0;
+	uint16_t i, cpu_samples = 0;
 	uint16_t nr_running;
 
 	gettimeofday(&start, NULL);
@@ -785,6 +786,7 @@ static void release_children_and_wait(struct options *opts,
 	for (i = 0; i < 4; ++i) {
 		sleep(1);
 		stat_snapshot(disp, ctl, opts->nr_tasks);
+		cpu_use(soak_arr);
 		printf(".");
 		fflush(stdout);
 	}
@@ -806,11 +808,14 @@ static void release_children_and_wait(struct options *opts,
 
 	last_ts = first_ts;
 	while (nr_running) {
+		double cpu;
+
 		sleep(1);
 
 		/* XXX big bug, need to mark some ctl elements dead */
 		stat_snapshot(disp, ctl, nr_running);
 		gettimeofday(&now, NULL);
+		cpu = cpu_use(soak_arr);
 
 		if (!opts->summary_only) {
 			double scale;
@@ -828,10 +833,12 @@ static void release_children_and_wait(struct options *opts,
 				scale * throughput(disp) / 1024.0,
 				scale * avg(&disp[S_SENDMSG_USECS]),
 				scale * avg(&disp[S_RTT_USECS]),
-				scale * cpu_use(soak_arr));
+				scale * cpu);
 		}
 
 		stat_accumulate(summary, disp);
+		cpu_total += cpu;
+		cpu_samples++;
 		last_ts = now;
 
 		if (timerisset(&end)) {
@@ -868,7 +875,7 @@ static void release_children_and_wait(struct options *opts,
 			scale * throughput(summary) / 1024.0,
 			avg(&summary[S_SENDMSG_USECS]),
 			avg(&summary[S_RTT_USECS]),
-			-1.0);
+			soak_arr? scale * cpu_total : -1.0);
 	}
 }	
 

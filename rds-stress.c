@@ -1007,6 +1007,9 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	peer_send(fd, &ok, sizeof(ok));
 	peer_recv(fd, &ok, sizeof(ok));
 
+	/* Close socket now, to prevent long TIME_WAIT delays */
+	close(fd);
+
 	release_children_and_wait(opts, ctl, soak_arr);
 
 	return 0;

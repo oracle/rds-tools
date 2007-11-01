@@ -1,3 +1,7 @@
+prefix		= $(INSTALL_ROOT)@prefix@
+exec_prefix	= @exec_prefix@
+bindir		= @bindir@
+mandir		= @mandir@
 
 all: all-programs
 
@@ -22,6 +26,12 @@ endif
 PROGRAMS = rds-gen rds-sink rds-info rds-stress
 
 all-programs: $(PROGRAMS)
+
+install: $(PROGRAMS)
+	install -d $(bindir)
+	install -m 555 -s $(PROGRAMS) $(bindir)
+	install -d $(mandir)/man1
+	install -m 644 *.1 $(mandir)/man1
 
 clean:
 	rm -f $(PROGRAMS) $(CLEAN_OBJECTS)

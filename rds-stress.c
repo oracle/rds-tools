@@ -957,7 +957,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	struct child_control *ctl;
 	struct sockaddr_in sin;
 	socklen_t socklen;
-	int fd;
+	int lfd, fd;
 	ssize_t ret;
 	uint8_t ok;
 
@@ -965,14 +965,18 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	sin.sin_port = htons(port);
 	sin.sin_addr.s_addr = htonl(addr);
 
-	fd = bound_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sin);
+	lfd = bound_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sin);
 
-	if (listen(fd, 255))
+	if (listen(lfd, 255))
 		die_errno("listen() failed");
 
-	fd = accept(fd, (struct sockaddr *)&sin, &socklen);
+	fd = accept(lfd, (struct sockaddr *)&sin, &socklen);
 	if (fd < 0)
 		die_errno("accept() failed");
+
+	/* Do not accept any further connections - we don't handle them
+	 * anyway. */
+	close(lfd);
 
 	printf("accepted connection from %s:%u\n", inet_ntoa(sin.sin_addr),
 		ntohs(sin.sin_port));

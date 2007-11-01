@@ -184,7 +184,7 @@ static void usage(void)
 	"Example:\n"
 	"  recv$ rds-stress -r recv -p 4000\n"
 	"  send$ rds-stress -r send -s recv -p 4000 -q 4096 -t 2 -d 2\n"
-	"\n", MIN_MSG_BYTES);
+	"\n", (int) MIN_MSG_BYTES);
 
 	exit(2);
 }
@@ -202,7 +202,7 @@ static void check_parent(char *path, pid_t pid)
  * end, and middle of the message.  We made sure that all three could fit
  * by making the min message size 128.
  */
-static void fill_hdr(char *message, uint32_t bytes, struct header *hdr)
+static void fill_hdr(unsigned char *message, uint32_t bytes, struct header *hdr)
 {
 	uint32_t off[3] = { 0, bytes / 2, bytes - sizeof(struct header) };
 	int i;
@@ -327,7 +327,7 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 	fd = bound_socket(val, SOCK_SEQPACKET, 0, sin);
 
 	bytes = opts->nr_tasks * opts->req_depth * 
-		(opts->req_size + opts->ack_size);
+		(opts->req_size + opts->ack_size) * 2;
 
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(bytes)))
 		die_errno("setsockopt(SNDBUF, %d) failed", bytes);
@@ -370,7 +370,7 @@ static int send_packet(int fd, struct task *t, unsigned int op,
 {
 	unsigned char buf[size];
 	struct header hdr;
-	int ret;
+	ssize_t ret;
 
 	hdr.op = op;
 	hdr.seq = htonl(t->send_seq);
@@ -425,7 +425,7 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 		struct options *opts,
 		struct child_control *ctl)
 {
-	int ret;
+	ssize_t ret;
 
 	/* send an ack in response to the req we just got */
 	ret = send_packet(fd, t, OP_ACK, qindex, opts->ack_size);
@@ -449,7 +449,8 @@ static int recv_one(int fd, struct task *tasks,
 	struct timeval tstamp;
 	struct task *t;
 	uint16_t expect_index;
-	int ret, task_index;
+	int task_index;
+	ssize_t ret;
 
 	socklen = sizeof(struct sockaddr_in);
 	ret = recvfrom(fd, buf, max(opts->req_size, opts->ack_size), 0,
@@ -1063,7 +1064,7 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 	if (size == ~0)
 		die("specify %s with %s\n", desc, opt);
 	if (size < max)
-		die("%s must be at least %zu bytes\n", desc, max);
+		die("%s must be at least %u bytes\n", desc, max);
 }
 
 int main(int argc, char **argv)

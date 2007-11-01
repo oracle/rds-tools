@@ -194,11 +194,16 @@ static void usage(void)
 	exit(2);
 }
 
-/* This hack lets children notice when their parents die, it's not so great */
-static void check_parent(char *path, pid_t pid)
+/* This hack lets children notice when their parents die.
+ * We could also use kill(0), but that results in false
+ * positives when the parent is a zombie (and that happens
+ * if you have a script parsing the output of rds-stress,
+ * and the parent dies).
+ */
+static void check_parent(pid_t pid)
 {
-	if (access(path, 1))
-		die_errno("parent %u exited", pid);
+	if (pid != getppid())
+		die("parent %u exited\n", pid);
 }
 
 /*
@@ -535,7 +540,6 @@ static int recv_one(int fd, struct task *tasks,
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct options *opts, uint16_t id)
 {
-	char parent_proc[PATH_MAX];
 	struct sockaddr_in sin;
 	struct pollfd pfd;
 	int fd;
@@ -559,12 +563,10 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 	fd = rds_socket(opts, &sin);
 
-	sprintf(parent_proc, "/proc/%llu", (unsigned long long)parent_pid);
-
 	ctl->ready = 1;
 
 	while (ctl->start.tv_sec == 0) {
-		check_parent(parent_proc, parent_pid);
+		check_parent(parent_pid);
 		sleep(1);
 	}
 
@@ -580,7 +582,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	while (1) {
 		struct task *t;
 
-		check_parent(parent_proc, parent_pid);
+		check_parent(parent_pid);
 
 		ret = poll(&pfd, 1, -1);
 		if (ret < 0)
@@ -991,7 +993,6 @@ static int passive_parent(uint32_t addr, uint16_t port,
  */
 static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 {
-	char parent_proc[PATH_MAX];
 	uint64_t i;
 	uint64_t per_sec;
 	struct timeval start;
@@ -999,8 +1000,6 @@ static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 	uint64_t usecs;
 
 	soak->per_sec = 1000;
-
-	sprintf(parent_proc, "/proc/%llu", (unsigned long long)parent_pid);
 
 	while (1) {
 		gettimeofday(&start, NULL);
@@ -1016,7 +1015,7 @@ static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 		if (per_sec > soak->per_sec)
 			soak->per_sec = per_sec;
 
-		check_parent(parent_proc, parent_pid);
+		check_parent(parent_pid);
 	}
 }
 

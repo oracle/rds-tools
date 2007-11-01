@@ -539,7 +539,7 @@ static int recv_one(int fd, struct task *tasks,
 
 	if (hdr.op == OP_ACK) {
 		stat_inc(&ctl->cur[S_RTT_USECS],
-			 usec_sub(&tstamp, &t->send_time[t->recv_index]));
+			 usec_sub(&tstamp, &t->send_time[expect_index]));
 		t->pending -= 1;
 	} else {
 		t->unacked += 1;

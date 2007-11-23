@@ -391,24 +391,29 @@ struct task {
 	uint16_t		send_index;
 	uint16_t		recv_index;
 	struct timeval *	send_time;
+	struct header *		ack_header;
 };
 
-static int send_packet(int fd, struct task *t, unsigned int op,
-		unsigned int qindex, unsigned int size)
+static void build_header(struct task *t, struct header *hdr,
+		unsigned int op, unsigned int qindex)
+{
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->op = op;
+	hdr->seq = htonl(t->send_seq);
+	hdr->from_addr = t->src_addr.sin_addr.s_addr;
+	hdr->from_port = t->src_addr.sin_port;
+	hdr->to_addr = t->dst_addr.sin_addr.s_addr;
+	hdr->to_port = t->dst_addr.sin_port;
+	hdr->index = htons(qindex);
+}
+
+static int send_packet(int fd, struct task *t,
+		struct header *hdr, unsigned int size)
 {
 	unsigned char buf[size];
-	struct header hdr;
 	ssize_t ret;
 
-	hdr.op = op;
-	hdr.seq = htonl(t->send_seq);
-	hdr.from_addr = t->src_addr.sin_addr.s_addr;
-	hdr.from_port = t->src_addr.sin_port;
-	hdr.to_addr = t->dst_addr.sin_addr.s_addr;
-	hdr.to_port = t->dst_addr.sin_port;
-	hdr.index = htons(qindex);
-
-	fill_hdr(buf, size, &hdr);
+	fill_hdr(buf, size, hdr);
 
 	ret = sendto(fd, buf, size, 0,
 		     (struct sockaddr *) &t->dst_addr,
@@ -430,10 +435,13 @@ static int send_one(int fd, struct task *t,
 {
 	struct timeval start;
 	struct timeval stop;
+	struct header hdr;
 	int ret;
 
+	build_header(t, &hdr, OP_REQ, t->send_index);
+
 	gettimeofday(&start, NULL);
-	ret = send_packet(fd, t, OP_REQ, t->send_index, opts->req_size);
+	ret = send_packet(fd, t, &hdr, opts->req_size);
 	gettimeofday(&stop, NULL);
 
 	if (ret < 0)
@@ -453,10 +461,11 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 		struct options *opts,
 		struct child_control *ctl)
 {
+	struct header *hdr = &t->ack_header[qindex];
 	ssize_t ret;
 
 	/* send an ack in response to the req we just got */
-	ret = send_packet(fd, t, OP_ACK, qindex, opts->ack_size);
+	ret = send_packet(fd, t, hdr, opts->ack_size);
 	if (ret < 0)
 		return ret;
 	if (ret != opts->ack_size)
@@ -580,6 +589,12 @@ static int recv_one(int fd, struct task *tasks,
 			 usec_sub(&tstamp, &t->send_time[expect_index]));
 		t->pending -= 1;
 	} else {
+		struct header *ack_hdr;
+
+		/* Build the ACK header right away */
+		ack_hdr = &t->ack_header[t->recv_index];
+		build_header(t, ack_hdr, OP_ACK, t->recv_index);
+
 		t->unacked += 1;
 		t->recv_index = (t->recv_index + 1) % opts->req_depth;
 	}
@@ -612,6 +627,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
 		tasks[i].dst_addr.sin_port = htons(opts->starting_port + 1 + i);
 		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
+		tasks[i].ack_header = alloca(opts->req_depth * sizeof(struct header));
 	}
 
 	fd = rds_socket(opts, &sin);

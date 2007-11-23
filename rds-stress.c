@@ -234,17 +234,29 @@ static void check_parent(pid_t pid)
 
 /*
  * put a pattern in the message so the remote side can verify that it's
- * what was expected.  For now we put a little struct at the beginning,
- * end, and middle of the message.  We made sure that all three could fit
- * by making the min message size 128.
+ * what was expected.
  */
-static void fill_hdr(unsigned char *message, uint32_t bytes, struct header *hdr)
-{
-	uint32_t off[3] = { 0, bytes / 2, bytes - sizeof(struct header) };
-	int i;
+static unsigned char *	msg_pattern;
 
-	for (i = 0; i < 3; i++)
-		memcpy(message + off[i], hdr, sizeof(struct header));
+static void init_msg_pattern(struct options *opts)
+{
+	unsigned int max_size = max(opts->req_size, opts->ack_size);
+	unsigned int i, k = 11;
+
+	msg_pattern = malloc(max_size);
+
+	/* k = 41 * (k + 3) is a generator of Z(256). Adding
+	 * (i >> 8) makes sure the pattern is shifted by 1 in
+	 * every successive 256 byte block, so that we can detect
+	 * swapped blocks. */
+	for (i = 0; i < max_size; i++, k = 41 * (k + 3) + (i >> 8))
+		msg_pattern[i] = k;
+}
+
+static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
+{
+	memcpy(message, hdr, sizeof(*hdr));
+	memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
 }
 
 static char *inet_ntoa_32(uint32_t val)
@@ -253,16 +265,10 @@ static char *inet_ntoa_32(uint32_t val)
 	return inet_ntoa(addr);
 }
 
-static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
+static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 {
-	struct header *chk;
-	uint32_t off[3] = { 0, bytes / 2, bytes - sizeof(struct header) };
-	int i;
-
-	for (i = 0; i < 3; i++) {
-		chk = message + off[i];
-		if (!memcmp(chk, hdr, sizeof(struct header)))
-			continue;
+	if (memcmp(message, hdr, sizeof(*hdr))) {
+		struct header *chk = (struct header *) message;
 
 #define bleh(var, disp)					\
 		disp(hdr->var),				\
@@ -274,7 +280,7 @@ static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
 		 * with stdout() and we don't get things stomping on each
 		 * other
 		 */
-		printf( "An incoming message had a header at offset %u which\n"
+		printf( "An incoming message had a header which\n"
 			"didn't contain the fields we expected:\n"
 			"    member        expected eq             got\n"
 			"       seq %15u %s %15u\n"
@@ -284,7 +290,6 @@ static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
 			"   to_port %15u %s %15u\n"
 			"     index %15u %s %15u\n"
 			"        op %15u %s %15u\n",
-			off[i],
 			bleh(seq, ntohl),
 			bleh(from_addr, inet_ntoa_32),
 			bleh(from_port, ntohs),
@@ -295,6 +300,24 @@ static int check_hdr(void *message, uint32_t bytes, struct header *hdr)
 #undef bleh
 
 		return 1;
+	}
+
+	if (memcmp(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr))) {
+		unsigned char *p = message + sizeof(*hdr);
+		unsigned int i, count = 0;
+		int offset = -1;
+
+		for (i = 0; i < bytes - sizeof(*hdr); ++i) {
+			if (p[i] != msg_pattern[i]) {
+				if (offset < 0)
+					offset = i;
+				count++;
+			}
+		}
+
+		printf("An incoming message has a corrupted payload at offset %u; "
+				"%u bytes corrupted\n",
+				offset, count);
 	}
 
 	return 0;
@@ -715,6 +738,8 @@ static struct child_control *start_children(struct options *opts)
 		die("mmap of %u child control structs failed", opts->nr_tasks);
 
 	memset(ctl, 0, len);
+
+	init_msg_pattern(opts);
 
 	for (i = 0; i < opts->nr_tasks; i++) {
 		pid = fork();

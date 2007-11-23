@@ -635,8 +635,11 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		check_parent(parent_pid);
 
 		ret = poll(&pfd, 1, -1);
-		if (ret < 0)
+		if (ret < 0) {
+			if (errno == EINTR)
+				continue;
 			die_errno("poll failed");
+		}
 
 		pfd.events = POLLIN;
 

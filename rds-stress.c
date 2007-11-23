@@ -46,6 +46,7 @@ struct options {
 	uint32_t	run_time;
 	uint8_t		summary_only;
 	uint8_t		rtprio;
+	uint8_t		tracing;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -130,6 +131,12 @@ struct header {
 	exit(1);						\
 } while (0)
 
+static int	opt_tracing;
+#define trace(fmt...) do {		\
+	if (opt_tracing)		\
+		fprintf(stderr, fmt);	\
+} while (0)
+
 #define min(a,b) (a < b ? a : b)
 #define max(a,b) (a > b ? a : b)
 
@@ -187,6 +194,7 @@ static void usage(void)
 	"\n"
 	"Optional behavioural flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
+	" -V                trace execution\n"
 	" -z                print a summary at end of test only\n"
 	"\n"
 	"Example:\n"
@@ -596,6 +604,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
 	struct timeval start;
+
+	opt_tracing = opts->tracing;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port + 1 + id);
@@ -1177,6 +1187,7 @@ int main(int argc, char **argv)
 	opts.req_size = 1024;
 	opts.run_time = 0;
 	opts.summary_only = 0;
+	opts.tracing = 0;
 
         while(1) {
 		int c;
@@ -1220,6 +1231,9 @@ int main(int argc, char **argv)
 				break;
 			case 'z':
 				opts.summary_only = 1;
+				break;
+			case 'V':
+				opts.tracing = 1;
 				break;
                         case 'h':
                         case '?':

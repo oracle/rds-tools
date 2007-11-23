@@ -47,70 +47,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include "net/rds.h"
 #include "rdstool.h"
-
-#define RDS_INFO_COUNTERS		10000
-#define RDS_INFO_CONNECTIONS		10001
-//#define RDS_INFO_FLOWS			10002 /* no longer exist */
-#define RDS_INFO_SEND_MESSAGES		10003
-#define RDS_INFO_RETRANS_MESSAGES       10004
-#define RDS_INFO_RECV_MESSAGES          10005
-#define RDS_INFO_SOCKETS                10006
-#define RDS_INFO_TCP_SOCKETS            10007
-
-struct rds_info_counter {
-	uint8_t		name[32];
-	uint64_t	value;
-};
-
-#define RDS_INFO_CONNECTION_FLAG_SENDING	0x01
-#define RDS_INFO_CONNECTION_FLAG_CONNECTING	0x02
-#define RDS_INFO_CONNECTION_FLAG_CONNECTED	0x04
-
-struct rds_info_connection {
-	uint64_t	next_tx_seq;
-	uint64_t	next_rx_seq;
-	uint32_t	laddr;
-	uint32_t	faddr;
-	uint8_t		transport[15];           /* null term ascii */
-	uint8_t		flags;
-} __attribute__((packed));
-
-struct rds_info_socket {
-	uint32_t	sndbuf;
-	uint32_t	bound_addr;
-	uint32_t	connected_addr;
-	uint16_t	bound_port;
-	uint16_t	connected_port;
-	uint32_t	rcvbuf;
-} __attribute__((packed));
-
-#define RDS_INFO_MESSAGE_FLAG_ACK               0x01
-#define RDS_INFO_MESSAGE_FLAG_FAST_ACK          0x02
-
-struct rds_info_message {
-	uint64_t	seq;
-	uint32_t	len;
-	uint32_t	laddr;
-	uint32_t	faddr;
-	uint16_t	lport;
-	uint16_t	fport;
-	uint8_t		flags; /* currently unused */
-} __attribute__((packed));
-
-struct rds_info_tcp_socket {
-	/* _addr and _port are network (big) endian */
-        uint32_t          local_addr;
-        uint16_t          local_port;
-        uint32_t          peer_addr;
-        uint16_t          peer_port;
-        uint64_t             hdr_rem;
-        uint64_t             data_rem;
-        uint32_t             last_sent_nxt;
-        uint32_t             last_expected_una;
-        uint32_t             last_seen_una;
-} __attribute__((packed));
-
 
 #define rds_conn_flag(conn, flag, letter) \
 	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')

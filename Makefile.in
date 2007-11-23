@@ -2,6 +2,7 @@ prefix		= $(INSTALL_ROOT)@prefix@
 exec_prefix	= @exec_prefix@
 bindir		= @bindir@
 mandir		= @mandir@
+incdir		= @includedir@
 
 all: all-programs
 
@@ -32,6 +33,8 @@ install: $(PROGRAMS)
 	install -m 555 -s $(PROGRAMS) $(bindir)
 	install -d $(mandir)/man1
 	install -m 644 *.1 $(mandir)/man1
+	install -d $(incdir)/net
+	install -m 444 net/rds.h $(incdir)/net
 
 clean:
 	rm -f $(PROGRAMS) $(CLEAN_OBJECTS)

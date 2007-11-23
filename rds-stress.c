@@ -20,6 +20,7 @@
 #include <sys/poll.h>
 #include <fcntl.h>
 #include <sched.h>
+#include "net/rds.h"
 
 /*
  *

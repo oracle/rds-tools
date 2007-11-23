@@ -39,6 +39,10 @@
  * setsockopt/getsockopt for SOL_RDS
  */
 #define RDS_CANCEL_SENT_TO      	1
+#define RDS_GET_MR			2
+#define RDS_FREE_MR			3
+#define RDS_BARRIER			4
+
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001
 /* 10002 aka RDS_INFO_FLOWS is deprecated */
@@ -100,6 +104,52 @@ struct rds_info_tcp_socket {
         uint32_t             last_expected_una;
         uint32_t             last_seen_una;
 } __attribute__((packed));
+
+
+/*
+ * RDMA related types
+ *
+ * RDMAs are set up through control messages
+ * with SOL_RDS/CMSG_RDMA_ARGS
+ * The cmsg_data is a struct rds_rdma_args.
+ */
+#define RDS_CMSG_RDMA_ARGS		1
+
+struct rds_iovec {
+	uint64_t		addr;
+	uint64_t		bytes;
+};
+
+struct rds_barrier_args {
+	uint32_t		daddr;
+	uint32_t		flags;  /* MSG_DONTWAIT */
+	uint64_t		rdma_id_addr;
+	uint64_t		wait_rdma_id;
+};
+
+struct rds_get_mr_args {
+	struct rds_iovec	vec;
+	uint64_t		key_addr;
+	uint64_t		phy_addr;
+};
+
+struct rds_free_mr_args {
+	uint64_t		key;
+	uint64_t		flags;
+};
+/* Values for rds_free_mr_args.flags */
+#define RDS_FREE_MR_ARGS_INVALIDATE 1
+
+struct rds_rdma_args {
+	struct rds_iovec	remote_vec;
+	uint64_t		r_key;
+	uint64_t		local_vec_addr;
+	uint64_t		nr_local;
+	uint64_t		flags;
+	uint64_t		rdma_id_addr;
+};
+/* Values for rds_rdma_args.flags */
+#define RDS_RDMA_ARGS_WRITE 1  /* read when not set */
 
 
 

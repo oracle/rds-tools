@@ -68,13 +68,16 @@ static void explode(const char *reason)
 	exit(1);
 }
 
-static int discover_constant(const char *path, int official)
+static int discover_constant(const char *path, int official, int *found)
 {
 	int fd;
 	ssize_t ret, total = 0;
 	char buf[PATH_MAX];
 	char *ptr;
 	long val;
+
+	if (*found >= 0)
+		return *found;
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0)
@@ -97,15 +100,20 @@ static int discover_constant(const char *path, int official)
 	if ((val > INT_MAX) || !ptr || (*ptr && (*ptr != '\n')))
 		explode("Invalid address constant");
 
+	*found = val;
 	return (int)val;
 }
 
 int discover_pf_rds()
 {
-	return discover_constant(PF_RDS_PATH, OFFICIAL_PF_RDS);
+	static int	pf_rds = -1;
+
+	return discover_constant(PF_RDS_PATH, OFFICIAL_PF_RDS, &pf_rds);
 }
 
 int discover_sol_rds()
 {
-	return discover_constant(SOL_RDS_PATH, OFFICIAL_SOL_RDS);
+	static int	sol_rds = -1;
+
+	return discover_constant(SOL_RDS_PATH, OFFICIAL_SOL_RDS, &sol_rds);
 }

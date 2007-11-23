@@ -22,6 +22,10 @@
 #include <sched.h>
 #include "net/rds.h"
 
+#ifdef DYNAMIC_PF_RDS
+#include "pfhack.h"
+#endif
+
 /*
  *
  * TODO
@@ -341,22 +345,12 @@ static int bound_socket(int domain, int type, int protocol,
 
 static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 {
-	char str[32] = {0, };
 	int bytes;
 	int fd;
 	int val;
 	socklen_t optlen;
 
-	fd = open("/proc/sys/net/rds/pf_rds", O_RDONLY);
-	if (fd < 0)
-		die_errno("open(/proc/sys/net/rds/pf_rds) failed");
-
-	read(fd, str, sizeof(str));
-
-	sscanf(str, "%d", &val);
-	close(fd);
-
-	fd = bound_socket(val, SOCK_SEQPACKET, 0, sin);
+	fd = bound_socket(PF_RDS, SOCK_SEQPACKET, 0, sin);
 
 	bytes = opts->nr_tasks * opts->req_depth * 
 		(opts->req_size + opts->ack_size) * 2;
@@ -1173,6 +1167,12 @@ int main(int argc, char **argv)
 {
 	struct options opts;
 	struct soak_control *soak_arr = NULL;
+
+#ifdef DYNAMIC_PF_RDS
+	/* Discover PF_RDS/SOL_RDS once, and be done with it */
+	(void) discover_pf_rds();
+	(void) discover_sol_rds();
+#endif
 
 	/* We really want to see output when we redirect
 	 * stdout to a pipe. */

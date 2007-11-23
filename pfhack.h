@@ -53,6 +53,7 @@ extern int discover_pf_rds();
 extern int discover_sol_rds();
 
 #define AF_RDS discover_pf_rds()
+#define PF_RDS AF_RDS
 #define SOL_RDS discover_sol_rds()
 #endif  /* DYNAMIC_PF_RDS */
 

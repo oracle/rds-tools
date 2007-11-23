@@ -411,13 +411,22 @@ static int send_packet(int fd, struct task *t,
 		struct header *hdr, unsigned int size)
 {
 	unsigned char buf[size];
+	struct msghdr msg;
+	struct iovec iov;
 	ssize_t ret;
 
 	fill_hdr(buf, size, hdr);
 
-	ret = sendto(fd, buf, size, 0,
-		     (struct sockaddr *) &t->dst_addr,
-		     sizeof(t->dst_addr));
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name  = (struct sockaddr *) &t->dst_addr;
+	msg.msg_namelen = sizeof(t->dst_addr);
+
+	msg.msg_iovlen = 1;
+	msg.msg_iov = &iov;
+	iov.iov_base = buf;
+	iov.iov_len = size;
+
+	ret = sendmsg(fd, &msg, 0);
 	if (ret < 0) {
 		if (errno != EAGAIN)
 			die_errno("sendto() failed");

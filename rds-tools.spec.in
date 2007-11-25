@@ -15,13 +15,12 @@ rds-tools is a collection of support tools for the RDS socket API.
 %setup -n rds-tools-%{version}-%{release}
  
 %build
-make
+%configure
+make %{?_smp_mflags}
 
 %install
-
-mkdir -p $RPM_BUILD_ROOT/{%{_mandir}/man1,%{_bindir}}
-install -m 755 rds-info rds-gen rds-sink rds-stress $RPM_BUILD_ROOT/%{_bindir}
-install -m 755 rds-info.1 rds-gen.1 rds-sink.1 rds-stress.1 $RPM_BUILD_ROOT/%{_mandir}/man1
+rm -rf $RPM_BUILD_ROOT
+make DESTDIR=$RPM_BUILD_ROOT install
 
 %clean
 rm -rf $RPM_BUILD_ROOT
@@ -30,7 +29,10 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root)
 %{_bindir}/*
 %{_mandir}/*
+%{_includedir}/*
 
 %changelog
+* Sun Nov 25 2007 Vladimir Sokolovsky <vlad@mellanox.co.il>
+- Use DESTDIR
 * Mon Oct 27 2006 Zach Brown <zach.brown@oracle.com>
 - initial version

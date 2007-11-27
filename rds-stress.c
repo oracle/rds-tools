@@ -52,6 +52,7 @@ struct options {
 	uint8_t		summary_only;
 	uint8_t		rtprio;
 	uint8_t		tracing;
+	uint8_t		verify;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -156,7 +157,11 @@ struct header {
 	exit(1);						\
 } while (0)
 
+/* These are global, so that we don't have to pass struct options
+ * into every function */
+static int	opt_verify;
 static int	opt_tracing;
+
 #define trace(fmt...) do {		\
 	if (opt_tracing)		\
 		fprintf(stderr, fmt);	\
@@ -284,7 +289,8 @@ static void init_msg_pattern(struct options *opts)
 static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
 {
 	memcpy(message, hdr, sizeof(*hdr));
-	memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
+	if (opt_verify)
+		memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
 }
 
 /* inet_ntoa uses a static buffer, so calling it twice in
@@ -341,7 +347,8 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 		return 1;
 	}
 
-	if (memcmp(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr))) {
+	if (opt_verify
+	 && memcmp(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr))) {
 		unsigned char *p = message + sizeof(*hdr);
 		unsigned int i, count = 0;
 		int offset = -1;
@@ -534,7 +541,7 @@ static void free_rdma_key(int fd, uint64_t key)
 }
 
 
-static void  rds_fill_buffer(void *buf, size_t size, uint64_t pattern)
+static void rds_fill_buffer(void *buf, size_t size, uint64_t pattern)
 {
 	uint64_t *pos, *end;
 
@@ -638,7 +645,6 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 		unsigned int rdma_size, unsigned int req_depth)
 {
 	uint64_t *rdma_addr;
-	int	fill = 0;
 
 	rdma_addr = t->rdma_buf[t->send_index];
 
@@ -654,14 +660,14 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	hdr->rdma_key = get_rdma_key(fd, hdr->rdma_addr, hdr->rdma_size, &hdr->rdma_phyaddr);
 
 	if (RDMA_OP_READ == hdr->rdma_op) {
-		if (fill)
+		if (opt_verify)
 			rds_fill_buffer(rdma_addr, rdma_size, hdr->rdma_pattern);
 		trace("Requesting RDMA read for pattern %Lx "
 				"local addr to rdma read %p\n",
 				(unsigned long long) hdr->rdma_pattern,
 				rdma_addr);
 	} else {
-		if (fill)
+		if (opt_verify)
 			rds_fill_buffer(rdma_addr, rdma_size, 0);
 		trace("Requesting RDMA write for pattern %Lx "
 				"local addr to rdma write %p\n",
@@ -795,7 +801,6 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 	unsigned int rdma_size;
 	struct rds_rdma_args *rdmap;
 	struct cmsghdr *cmsg;
-	int fill = 0;
 
 	rdma_size = hdr->rdma_size;	/* ntohl? */
 
@@ -838,7 +843,7 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 	case RDMA_OP_WRITE:
 		rdmap->flags = RDS_RDMA_ARGS_WRITE;
 
-		if (fill)
+		if (opt_verify)
 			rds_fill_buffer(local_buf, rdma_size, hdr->rdma_pattern);
 		break;
 
@@ -851,8 +856,6 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 static void rdma_process_ack(int fd, struct header *hdr,
 		struct child_control *ctl)
 {
-	int	compare = 0;
-
 	trace("RDS rcvd rdma %s completion for request key %Lx len %u local addr %Lx phyaddr %Lx\n",
 		  RDMA_OP_WRITE == hdr->rdma_op ? "write" : "read",
 		  (unsigned long long) hdr->rdma_key,
@@ -875,7 +878,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		 */
 		stat_inc(&ctl->cur[S_RDMA_READ_BYTES],  hdr->rdma_size);
 
-		if (compare) {
+		if (opt_verify) {
 			/* This funny looking cast avoids compile warnings
 			 * on 32bit platforms. */
 			rds_compare_buffer((void *)(unsigned long) hdr->rdma_addr,
@@ -1792,7 +1795,7 @@ int main(int argc, char **argv)
         while(1) {
 		int c;
 
-		c = getopt(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:Vz");
+		c = getopt(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:vVz");
                 if (c == -1)
                         break;
 
@@ -1834,6 +1837,9 @@ int main(int argc, char **argv)
 				break;
 			case 'z':
 				opts.summary_only = 1;
+				break;
+			case 'v':
+				opts.verify = 1;
 				break;
 			case 'V':
 				opts.tracing = 1;

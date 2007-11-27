@@ -259,10 +259,21 @@ static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
 	memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
 }
 
+/* inet_ntoa uses a static buffer, so calling it twice in
+ * a single printf as we do below will produce undefined
+ * results. We copy the output two two static buffers,
+ * and switch between them.
+ */
 static char *inet_ntoa_32(uint32_t val)
 {
 	struct in_addr addr = { .s_addr = val };
-	return inet_ntoa(addr);
+	static char buffer[2][64];
+	static unsigned int select = 0;
+
+	select = 1 - select;
+	strncpy(buffer[select], inet_ntoa(addr), 63);
+
+	return buffer[select];
 }
 
 static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)

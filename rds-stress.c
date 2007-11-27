@@ -43,6 +43,7 @@ struct options {
 	uint32_t	req_depth;
 	uint32_t	req_size;
 	uint32_t	ack_size;
+	uint32_t	rdma_size;
 	uint32_t	send_addr;
 	uint32_t	receive_addr;
 	uint16_t	starting_port;
@@ -70,6 +71,8 @@ enum {
 	S_REQ_RX_BYTES,
 	S_ACK_TX_BYTES,
 	S_ACK_RX_BYTES,
+	S_RDMA_WRITE_BYTES,
+	S_RDMA_READ_BYTES,
 	S_SENDMSG_USECS,
 	S_RTT_USECS,
 	S__LAST
@@ -105,8 +108,12 @@ void stop_soakers(struct soak_control *soak_arr);
  * in flight at a time.  Acks are sent in response to requests and tend
  * to be smaller.
  */
-#define OP_REQ 1
-#define OP_ACK 2
+#define OP_REQ		1
+#define OP_ACK		2
+
+#define RDMA_OP_READ	1
+#define RDMA_OP_WRITE	2
+#define RDMA_OP_TOGGLE(x) (3 - (x))	/* read becomes write and vice versa */
 
 /*
  * Every message sent with sendmsg gets a header.  This lets the receiver
@@ -120,10 +127,24 @@ struct header {
 	uint16_t	to_port;
 	uint16_t	index;
 	uint8_t		op;
+
+	/* RDMA related.
+	 * rdma_op must be the first field, because we
+	 * use offsetof(rdma_op) in fill_hdr and check_hdr
+	 */
+	uint8_t		rdma_op;
+	uint64_t	rdma_addr;
+	uint64_t	rdma_phyaddr;
+	uint64_t	rdma_pattern;
+	uint64_t	rdma_key;
+	uint32_t	rdma_size;
+
 	uint8_t		data[0];
 } __attribute__((packed));
 
-#define MIN_MSG_BYTES (4 * sizeof(struct header))
+#define MIN_MSG_BYTES		(sizeof(struct header))
+#define BASIC_HEADER_SIZE	(size_t)(&((struct header *) 0)->rdma_op)
+
 #define die(fmt...) do {		\
 	fprintf(stderr, fmt);		\
 	exit(1);			\
@@ -143,6 +164,12 @@ static int	opt_tracing;
 
 #define min(a,b) (a < b ? a : b)
 #define max(a,b) (a > b ? a : b)
+
+/* This macro casts a pointer to uint64_t without producing
+   warnings on either 32bit or 64bit platforms. At least
+   with gcc, that is.
+ */
+#define ptr64(p)	((unsigned long) (p))
 
 /* zero is undefined */
 static inline uint64_t minz(uint64_t a, uint64_t b)
@@ -195,6 +222,7 @@ static void usage(void)
 	" -d [depth, 1]     request pipeline depth, nr outstanding\n"
 	" -t [nr, 1]        number of child tasks\n"
 	" -T [seconds, 0]   runtime of test, 0 means infinite\n"
+	" -D [bytes]        RDMA size (RDSv3 only)\n"
 	"\n"
 	"Optional behavioural flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
@@ -278,7 +306,7 @@ static char *inet_ntoa_32(uint32_t val)
 
 static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 {
-	if (memcmp(message, hdr, sizeof(*hdr))) {
+	if (memcmp(message, hdr, BASIC_HEADER_SIZE)) {
 		struct header *chk = (struct header *) message;
 
 #define bleh(var, disp)					\
@@ -415,6 +443,151 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 	return fd;
 }
 
+static int check_rdma_support(struct options *opts)
+{
+	struct sockaddr_in sin;
+	struct rds_barrier_args args;
+	uint64_t rdma_id = 0;
+	int fd, okay = 0;
+
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons(opts->starting_port);
+	sin.sin_addr.s_addr = htonl(opts->receive_addr);
+
+	fd = bound_socket(AF_RDS, SOCK_SEQPACKET, 0, &sin);
+
+	memset(&args, 0, sizeof(args));
+	args.daddr = htonl(opts->send_addr);
+	args.rdma_id_addr = ptr64(&rdma_id);
+	args.wait_rdma_id = 0;
+
+	if (setsockopt(fd, SOL_RDS, RDS_BARRIER, &args, sizeof(args)) >= 0) {
+		okay = 1;
+	} else if (errno == ENOPROTOOPT) {
+		okay = 0;
+	} else {
+		die_errno("%s: RDS_BARRIER failed with unexpected error",
+				__FUNCTION__);
+	}
+	close(fd);
+
+	return okay;
+}
+
+static uint64_t wait_for_rdma(int fd, struct sockaddr_in *sin, uint64_t wait_rdma_id)
+{
+	struct rds_barrier_args args;
+	uint64_t rdma_id = 0;
+
+	memset(&args, 0, sizeof(args));
+	args.daddr = sin->sin_addr.s_addr;
+	args.rdma_id_addr = ptr64(&rdma_id);
+	args.wait_rdma_id = wait_rdma_id;
+
+	if (setsockopt(fd, SOL_RDS, RDS_BARRIER, (char*)&args, sizeof(args)))
+		die_errno("setsockopt(RDS_BARRIER) failed");
+
+	trace("RDS wait_for_rdma rdma_id is %Lx\n",
+			(unsigned long long) rdma_id);
+
+	return rdma_id;
+}
+
+static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *phyaddr)
+{
+	uint64_t rkey = 0;
+	struct rds_get_mr_args mr_args;
+
+	mr_args.vec.addr = addr;
+	mr_args.vec.bytes = size;
+	mr_args.key_addr = ptr64(&rkey);
+	mr_args.phy_addr = ptr64(phyaddr);
+
+	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
+		die_errno("setsockopt(RDS_GET_MR) failed");
+
+	if (*phyaddr)
+		trace("RDS get_rdma_key(phys=%Lx) = %Lx\n",
+				(unsigned long long) *phyaddr,
+				(unsigned long long) rkey);
+	else
+		trace("RDS get_rdma_key() = %Lx\n",
+				(unsigned long long) rkey);
+
+	return rkey;
+}
+
+static void free_rdma_key(int fd, uint64_t key)
+{
+	struct rds_free_mr_args mr_args;
+
+	trace("RDS free_rdma_key(%Lx)\n", (unsigned long long) key);
+
+	mr_args.key = key;
+#if 1
+	mr_args.flags = 0;
+#else
+	mr_args.flags = RDS_FREE_MR_ARGS_INVALIDATE;
+#endif
+	if (setsockopt(fd, SOL_RDS, RDS_FREE_MR, &mr_args, sizeof(mr_args)))
+		die_errno("setsockopt(RDS_FREE_MR) failed");
+}
+
+
+static void  rds_fill_buffer(void *buf, size_t size, uint64_t pattern)
+{
+	uint64_t *pos, *end;
+
+	pos = (uint64_t *) buf;
+	end = (uint64_t *) (buf + size);
+	while (pos < end)
+		*pos++ = pattern;
+}
+
+
+static void  rds_dump_buffer(const void *buf, size_t size)
+{
+	const uint64_t *pos;
+	unsigned int i, count;
+
+	pos = (const uint64_t *) buf;
+
+	count = size / sizeof(uint64_t);
+	pos = (const uint64_t *) buf;
+
+	printf("rds_dump_buffer(%p, %u)\n", buf, (int) size);
+	for (i = 0; i < count; ++i) {
+		if ((i % 4) == 0)
+			printf("\n%08x:", i);
+		printf(" %016Lx", (unsigned long long) *pos++);
+	}
+}
+
+static void rds_compare_buffer(uint64_t *addr, int size, uint64_t pattern)
+{
+	int d, failed = 0;
+
+	for (d = 0; d < size / sizeof(uint64_t); d++) {
+		if (addr[d] == pattern)
+			continue;
+
+		failed = 1;
+		trace("compare fail pattern offset %u: expected %Lx got %Lx\n",
+				8 * d,
+				(unsigned long long) pattern,
+				(unsigned long long) addr[d]);
+
+#if 0
+		rds_dump_buffer(addr, size);
+		die("compare pass\n");
+#endif
+	}
+
+	if (!failed)
+		trace("compare pass pattern %Lx addr %p\n",
+			(unsigned long long) pattern, addr);
+}
+
 struct task {
 	unsigned int		pending;
 	unsigned int		unacked;
@@ -426,7 +599,296 @@ struct task {
 	uint16_t		recv_index;
 	struct timeval *	send_time;
 	struct header *		ack_header;
+
+	/* RDMA related stuff */
+	uint64_t **		local_buf;
+	uint64_t **		rdma_buf;
+	uint64_t *		rdma_id;
+	uint32_t		buffid;
+	uint8_t			rdma_next_op;
 };
+
+static void alloc_rdma_buffers(struct task *t, struct options *opts)
+{
+	unsigned int i, j;
+	size_t len;
+	caddr_t	base;
+
+	/* We use mmap here rather than malloc, because it is always
+	 * page aligned. */
+	len = 2 * opts->nr_tasks * opts->req_depth * opts->rdma_size;
+	base = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0);
+	if (base == MAP_FAILED)
+		die_errno("alloc_rdma_buffers: mmap failed");
+
+	for (i = 0; i < opts->nr_tasks; ++i, ++t) {
+		for (j = 0; j < opts->req_depth; ++j) {
+			t->rdma_buf[j] = (uint64_t *) base;
+			base += opts->rdma_size;
+
+			t->local_buf[j] = (uint64_t *) base;
+			base += opts->rdma_size;
+
+			t->rdma_id[j] = 0;
+		}
+	}
+}
+
+static void rdma_build_req(int fd, struct header *hdr, struct task *t,
+		unsigned int rdma_size, unsigned int req_depth)
+{
+	uint64_t *rdma_addr;
+	int	fill = 0;
+
+	rdma_addr = t->rdma_buf[t->send_index];
+
+	/* We alternate between RDMA READ and WRITEs */
+	hdr->rdma_op = t->rdma_next_op;
+	t->rdma_next_op = RDMA_OP_TOGGLE(t->rdma_next_op);
+
+	/* FIXME! rdma_size and req_depth need htonl */
+	hdr->rdma_pattern = (((uint64_t) t->send_seq) << 32) | getpid();
+	hdr->rdma_addr = ptr64(rdma_addr);
+	hdr->rdma_phyaddr = 0;
+	hdr->rdma_size = rdma_size;
+	hdr->rdma_key = get_rdma_key(fd, hdr->rdma_addr, hdr->rdma_size, &hdr->rdma_phyaddr);
+
+	if (RDMA_OP_READ == hdr->rdma_op) {
+		if (fill)
+			rds_fill_buffer(rdma_addr, rdma_size, hdr->rdma_pattern);
+		trace("Requesting RDMA read for pattern %Lx "
+				"local addr to rdma read %p\n",
+				(unsigned long long) hdr->rdma_pattern,
+				rdma_addr);
+	} else {
+		if (fill)
+			rds_fill_buffer(rdma_addr, rdma_size, 0);
+		trace("Requesting RDMA write for pattern %Lx "
+				"local addr to rdma write %p\n",
+				(unsigned long long) hdr->rdma_pattern,
+				rdma_addr);
+	}
+}
+
+static void rdma_validate(const struct header *in_hdr, struct options *opts)
+{
+	unsigned long	rdma_size;
+
+	rdma_size = in_hdr->rdma_size;      /* ntohl? */
+	if (rdma_size != opts->rdma_size)
+		die("Unexpected RDMA size %lu in request\n", rdma_size);
+
+	if (in_hdr->rdma_op != RDMA_OP_READ && in_hdr->rdma_op != RDMA_OP_WRITE)
+		die("Unexpected RDMA op %u in request\n", in_hdr->rdma_op);
+
+
+	trace("RDS received request to issue rdma %s len %lu rva %Lx rpa %Lx key %Lx pattern %Lx\n",
+		in_hdr->rdma_op == RDMA_OP_WRITE? "write to" : "read from",
+		rdma_size,
+		(unsigned long long) in_hdr->rdma_addr,
+		(unsigned long long) in_hdr->rdma_phyaddr,
+		(unsigned long long) in_hdr->rdma_key,
+		(unsigned long long) in_hdr->rdma_pattern);
+}
+
+static void rdma_build_ack(struct header *hdr, const struct header *in_hdr)
+{
+	hdr->rdma_op = in_hdr->rdma_op;
+	hdr->rdma_size = in_hdr->rdma_size;
+	hdr->rdma_key = in_hdr->rdma_key;
+	hdr->rdma_phyaddr = in_hdr->rdma_phyaddr; /* remote's address to rdma to / from */
+	hdr->rdma_addr = in_hdr->rdma_addr; /* remote's address to rdma to / from */
+	hdr->rdma_pattern = in_hdr->rdma_pattern;
+}
+
+static int rdma_drain(int fd, struct task *t, uint64_t *wait_id)
+{
+	uint64_t	done_rdma_id;
+
+	if (*wait_id == 0)
+		return 0;
+
+	/* Can we really ever get here? */
+	trace("waiting for rdma ID=%Lx to complete\n",
+			(unsigned long long) *wait_id);
+
+	done_rdma_id = wait_for_rdma(fd, &t->dst_addr, *wait_id);
+	if (done_rdma_id < *wait_id) {
+		die("WAIT FAILED %Lx to complete, barrier is %Lx\n",
+			(unsigned long long) *wait_id,
+			(unsigned long long) done_rdma_id);
+	}
+
+	if (*wait_id)
+		die("Ran out of rdma id slots -> rdma_id[slot]=%Lx\n",
+				(unsigned long long) *wait_id);
+	return 0;
+}
+
+/*
+ * Check for completed RDMA operations without blocking.
+ * Updates the rdma_id vectors of all tasks.
+ * Returns 1 if there are pending ops left.
+ */
+static int rdma_complete(int fd, struct task *tasks,
+		struct options *opts,
+		struct child_control *ctl)
+{
+	struct rds_barrier_args args;
+	uint64_t	done_id, wait_id = 0;
+	unsigned int	i, j;
+
+	memset(&args, 0, sizeof(args));
+	args.daddr = htonl(opts->send_addr);
+
+	while (1) {
+		struct task *t = tasks;
+
+		args.rdma_id_addr = ptr64(&done_id);
+		args.wait_rdma_id = wait_id;
+
+		if (setsockopt(fd, SOL_RDS, RDS_BARRIER, &args, sizeof(args))) {
+			if (errno == EAGAIN)
+				return 1;
+			die_errno("setsockopt(RDS_BARRIER) failed");
+		}
+
+		if (done_id)
+			trace("%s: done=%Lx\n", __FUNCTION__,
+				(unsigned long long) done_id);
+
+		/* Free all completed slots. */
+		wait_id = 0xffffffffffffffffULL;
+		for (i = 0; i < opts->nr_tasks; ++i, ++t) {
+			for (j = 0; j < opts->req_depth; ++j) {
+				if (t->rdma_id[j] <= done_id)
+					t->rdma_id[j] = 0;
+				else if (t->rdma_id[j] < wait_id)
+					wait_id = t->rdma_id[j];
+			}
+		}
+
+		if (wait_id == 0xffffffffffffffffULL)
+			break;
+
+		/* Loop back and call RDS_BARRIER once more, so that
+		 * we register the next RDMA ID for which we want to
+		 * get woken up. */
+		args.flags = MSG_DONTWAIT;
+	}
+
+	return 0;
+}
+
+#define MSG_MAXIOVLEN 2
+
+/*
+ * This sets up all the fields for an RDMA transfer.
+ * The request is passed as a control message along with
+ * the ACK packet.
+ */
+static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
+		void *local_buf, uint64_t *rdma_id_p)
+{
+	static char ctlbuf[CMSG_SPACE(sizeof(struct rds_rdma_args))];
+	static struct rds_iovec iov;
+	unsigned int rdma_size;
+	struct rds_rdma_args *rdmap;
+	struct cmsghdr *cmsg;
+	int fill = 0;
+
+	rdma_size = hdr->rdma_size;	/* ntohl? */
+
+	trace("RDS issuing rdma for key %Lx rva %Lx len %u local_buf %p\n",
+			(unsigned long long) hdr->rdma_key,
+			(unsigned long long) hdr->rdma_phyaddr,
+			rdma_size, local_buf);
+
+	msg->msg_control = ctlbuf;
+	msg->msg_controllen = sizeof(ctlbuf);
+
+	cmsg = CMSG_FIRSTHDR(msg);
+	cmsg->cmsg_level = SOL_RDS;
+	cmsg->cmsg_type = RDS_CMSG_RDMA_ARGS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(struct rds_rdma_args));
+	msg->msg_controllen = cmsg->cmsg_len;
+
+	/* rdma args */
+	rdmap = (struct rds_rdma_args *) CMSG_DATA(cmsg);
+	memset(rdmap, 0, sizeof(*rdmap));
+
+	/* Set up the iovec pointing to the RDMA buffer */
+	rdmap->local_vec_addr = (uint64_t) &iov;
+	rdmap->nr_local = 1;
+	iov.addr = ptr64(local_buf);
+	iov.bytes = rdma_size;
+
+	/* sendmsg will fill in the RDMA ID assigned to this operation */
+	rdmap->rdma_id_addr = ptr64(rdma_id_p);
+
+	/* The remote could either give us a physical address, or
+	 * an index into a zero-based FMR. Either way, we just copy it.
+	 */
+	rdmap->remote_vec.addr = hdr->rdma_phyaddr;
+	rdmap->remote_vec.bytes = rdma_size;
+	rdmap->r_key = hdr->rdma_key;
+
+	/* read or write */
+	switch (hdr->rdma_op) {
+	case RDMA_OP_WRITE:
+		rdmap->flags = RDS_RDMA_ARGS_WRITE;
+
+		if (fill)
+			rds_fill_buffer(local_buf, rdma_size, hdr->rdma_pattern);
+		break;
+
+	case RDMA_OP_READ:
+		rdmap->flags = 0;
+		break;
+	}
+}
+
+static void rdma_process_ack(int fd, struct header *hdr,
+		struct child_control *ctl)
+{
+	int	compare = 0;
+
+	trace("RDS rcvd rdma %s completion for request key %Lx len %u local addr %Lx phyaddr %Lx\n",
+		  RDMA_OP_WRITE == hdr->rdma_op ? "write" : "read",
+		  (unsigned long long) hdr->rdma_key,
+		  hdr->rdma_size,	/* XXX ntohl? */
+		  (unsigned long long) hdr->rdma_addr,
+		  (unsigned long long) hdr->rdma_phyaddr);
+
+	/* XXX: match rdma_key with what we allocated? */
+
+	free_rdma_key(fd, hdr->rdma_key);
+
+	/* if acking an rdma write request - then remote node wrote local host buffer
+	 * (data in) so count this as rdma data coming in (rdma_read) - else remote node read
+	 * local host buffer so count this as rdma write (data out)
+	 */
+	switch (hdr->rdma_op) {
+	case RDMA_OP_WRITE:
+		/* remote node wrote local buffer check pattern
+		 * sent via immediate data in rdma buffer
+		 */
+		stat_inc(&ctl->cur[S_RDMA_READ_BYTES],  hdr->rdma_size);
+
+		if (compare) {
+			/* This funny looking cast avoids compile warnings
+			 * on 32bit platforms. */
+			rds_compare_buffer((void *)(unsigned long) hdr->rdma_addr,
+				hdr->rdma_size, 	/* XXX ntohl? */
+				hdr->rdma_pattern);
+		}
+		break;
+
+	case RDMA_OP_READ:
+		stat_inc(&ctl->cur[S_RDMA_WRITE_BYTES],  hdr->rdma_size);
+		break;
+	}
+}
 
 static void build_header(struct task *t, struct header *hdr,
 		unsigned int op, unsigned int qindex)
@@ -447,6 +909,7 @@ static int send_packet(int fd, struct task *t,
 	unsigned char buf[size];
 	struct msghdr msg;
 	struct iovec iov;
+	uint64_t *rdma_id_p = NULL;
 	ssize_t ret;
 
 	fill_hdr(buf, size, hdr);
@@ -460,6 +923,21 @@ static int send_packet(int fd, struct task *t,
 	iov.iov_base = buf;
 	iov.iov_len = size;
 
+	/* If this is an ACK packet with RDMA, build the cmsg
+	 * header that goes with it. */
+	if (hdr->op == OP_ACK && hdr->rdma_op != 0) {
+		unsigned int qindex = ntohs(hdr->index);
+
+		if (t->rdma_id[qindex] != 0) {
+			errno = ENOBUFS;
+			return -1;
+		}
+		rdma_id_p = &t->rdma_id[qindex];
+		rdma_drain(fd, t, rdma_id_p);
+		rdma_build_cmsg(&msg, hdr, t->local_buf[qindex], rdma_id_p);
+
+	}
+
 	ret = sendmsg(fd, &msg, 0);
 	if (ret < 0) {
 		if (errno != EAGAIN)
@@ -468,6 +946,11 @@ static int send_packet(int fd, struct task *t,
 	}
 	if (ret != size)
 		die("sendto() truncated - %zd", ret);
+
+	if (rdma_id_p)
+		trace("RDS rdma operation ID %Lx\n",
+			(unsigned long long) *rdma_id_p);
+
 	t->send_seq++;
 	return ret;
 }
@@ -482,6 +965,11 @@ static int send_one(int fd, struct task *t,
 	int ret;
 
 	build_header(t, &hdr, OP_REQ, t->send_index);
+	if (opts->rdma_size && t->send_seq > 10)
+		rdma_build_req(fd, &hdr, t,
+				opts->rdma_size,
+				opts->req_depth);
+
 
 	gettimeofday(&start, NULL);
 	ret = send_packet(fd, t, &hdr, opts->req_size);
@@ -515,6 +1003,18 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 		die_errno("sendto() returned %zd", ret);
 
 	stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
+
+	/* need separate rdma stats cells for send/recv */
+	switch (hdr->rdma_op) {
+	case RDMA_OP_WRITE:
+		stat_inc(&ctl->cur[S_RDMA_WRITE_BYTES], opts->rdma_size);
+		break;
+
+	case RDMA_OP_READ:
+		stat_inc(&ctl->cur[S_RDMA_READ_BYTES], opts->rdma_size);
+		break;
+	}
+
 	return ret;
 }
 
@@ -631,12 +1131,26 @@ static int recv_one(int fd, struct task *tasks,
 		stat_inc(&ctl->cur[S_RTT_USECS],
 			 usec_sub(&tstamp, &t->send_time[expect_index]));
 		t->pending -= 1;
+
+		if (in_hdr->rdma_key)
+			rdma_process_ack(fd, in_hdr, ctl);
 	} else {
 		struct header *ack_hdr;
 
 		/* Build the ACK header right away */
 		ack_hdr = &t->ack_header[t->recv_index];
 		build_header(t, ack_hdr, OP_ACK, t->recv_index);
+
+		/* The RDMA is performed at the time the ACK
+		 * message is sent. We need to mirror all
+		 * RDMA related header fields in our response
+		 * anyway, so that's a good place for send_ack
+		 * to pick them up from.
+		 */
+		if (in_hdr->rdma_key) {
+			rdma_validate(in_hdr, opts);
+			rdma_build_ack(ack_hdr, in_hdr);
+		}
 
 		t->unacked += 1;
 		t->recv_index = (t->recv_index + 1) % opts->req_depth;
@@ -670,8 +1184,15 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
 		tasks[i].dst_addr.sin_port = htons(opts->starting_port + 1 + i);
 		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
+		tasks[i].rdma_id = alloca(opts->req_depth * sizeof(uint64_t));
+		tasks[i].rdma_buf = alloca(opts->req_depth * sizeof(uint64_t *));
+		tasks[i].local_buf = alloca(opts->req_depth * sizeof(uint64_t *));
 		tasks[i].ack_header = alloca(opts->req_depth * sizeof(struct header));
+		tasks[i].rdma_next_op = (i & 1)? RDMA_OP_READ : RDMA_OP_WRITE;
 	}
+
+	if (opts->rdma_size)
+		alloc_rdma_buffers(tasks, opts);
 
 	fd = rds_socket(opts, &sin);
 
@@ -693,7 +1214,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
-		int can_send;
+		int can_send, check_rdma = 0;
 
 		check_parent(parent_pid);
 
@@ -710,6 +1231,10 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 			while (recv_one(fd, tasks, opts, ctl) >= 0)
 				;
 		}
+
+		/* Check for completed RDMA transfers */
+		if (opts->rdma_size && !rdma_complete(fd, tasks, opts, ctl))
+			check_rdma = 1;
 
 		/* keep the pipeline full */
 		can_send = !!(pfd.revents & POLLOUT);
@@ -731,6 +1256,12 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				continue;
 			}
 		}
+
+		/* We may have submitted new RDMA requests, so
+		 * ask the kernel to wake us up from poll when they
+		 * complete */
+		if (check_rdma)
+			rdma_complete(fd, tasks, opts, ctl);
 	}
 }
 
@@ -789,6 +1320,11 @@ static double throughput(struct counter *disp)
 {
 	return disp[S_REQ_TX_BYTES].sum + disp[S_REQ_RX_BYTES].sum +
 		disp[S_ACK_TX_BYTES].sum + disp[S_ACK_RX_BYTES].sum;
+}
+
+static double throughput_rdma(struct counter *disp)
+{
+	return disp[S_RDMA_WRITE_BYTES].sum + disp[S_RDMA_READ_BYTES].sum;
 }
 
 void stat_snapshot(struct counter *disp, struct child_control *ctl,
@@ -930,8 +1466,8 @@ static void release_children_and_wait(struct options *opts,
 	nr_running = opts->nr_tasks;
 	memset(summary, 0, sizeof(summary));
 
-	printf("%4s %6s %10s %7s %8s %5s\n",
-		"tsks", "tx/s", "tx+rx K/s", "tx us/c", "rtt us", "cpu %");
+	printf("%4s %6s %10s %10s %7s %8s %5s\n",
+		"tsks", "tx/s", "tx+rx K/s", "rw+rr K/s", "tx us/c", "rtt us", "cpu %");
 
 	if (opts->rtprio)
 		set_rt_priority();
@@ -957,10 +1493,11 @@ static void release_children_and_wait(struct options *opts,
 			 */
 			scale = 1e6 / usec_sub(&now, &last_ts);
 
-			printf("%4u %6"PRIu64" %10.2f %7.2f %8.2f %5.2f\n",
+			printf("%4u %6"PRIu64" %10.2f %10.2f %7.2f %8.2f %5.2f\n",
 				nr_running,
 				disp[S_REQ_TX_BYTES].nr,
 				scale * throughput(disp) / 1024.0,
+				scale * throughput_rdma(disp) / 1024.0,
 				scale * avg(&disp[S_SENDMSG_USECS]),
 				scale * avg(&disp[S_RTT_USECS]),
 				scale * cpu);
@@ -999,10 +1536,11 @@ static void release_children_and_wait(struct options *opts,
 
 		scale = 1e6 / usec_sub(&last_ts, &first_ts);
 
-		printf("%4u %6lu %10.2f %7.2f %8.2f %5.2f  (average)\n",
+		printf("%4u %6lu %10.2f %10.2f %7.2f %8.2f %5.2f  (average)\n",
 			opts->nr_tasks,
 			(long) (scale * summary[S_REQ_TX_BYTES].nr),
 			scale * throughput(summary) / 1024.0,
+			scale * throughput_rdma(disp) / 1024.0,
 			avg(&summary[S_SENDMSG_USECS]),
 			avg(&summary[S_RTT_USECS]),
 			soak_arr? scale * cpu_total : -1.0);
@@ -1249,11 +1787,12 @@ int main(int argc, char **argv)
 	opts.run_time = 0;
 	opts.summary_only = 0;
 	opts.tracing = 0;
+	opts.rdma_size = 0;
 
         while(1) {
 		int c;
 
-                c = getopt(argc, argv, "+a:cd:hp:q:Rr:s:t:T:z");
+		c = getopt(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:Vz");
                 if (c == -1)
                         break;
 
@@ -1264,6 +1803,9 @@ int main(int argc, char **argv)
                         case 'c':
 				soak_arr = start_soakers();
                                 break;
+			case 'D':
+				opts.rdma_size = parse_ull(optarg, (uint32_t)~0);
+				break;
                         case 'd':
 				opts.req_depth = parse_ull(optarg,(uint32_t)~0);
                                 break;
@@ -1323,6 +1865,16 @@ int main(int argc, char **argv)
 		opts.req_depth = 1;
 	if (opts.nr_tasks == (uint16_t)~0)
 		opts.nr_tasks = 1;
+
+	if (opts.rdma_size && !check_rdma_support(&opts))
+		die("RDMA not supported by this kernel\n");
+
+	/* We require RDMA to be multiples of the page size for now.
+	 * this is just to simplify debugging, but eventually we
+	 * need to support rdma sizes from 1 to 1meg byte
+	 */
+	if (opts.rdma_size)
+		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
 
 	return active_parent(&opts, soak_arr);
 }

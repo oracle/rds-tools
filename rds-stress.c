@@ -1690,6 +1690,8 @@ static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 	struct timeval stop;
 	uint64_t usecs;
 
+	nice(20);
+
 	soak->per_sec = 1000;
 
 	while (1) {

@@ -101,6 +101,14 @@ static ssize_t fill_stdin(struct rds_context *ctxt, char *bytes,
 	ssize_t ret = 0;
 	char *ptr = bytes;
 
+	static int first = 1;
+
+	if (!first)
+		return ret;
+
+	if (ctxt->rc_filename && strcmp(ctxt->rc_filename,"-"))
+		first = 0;
+
 	while (len && runningp()) {
 		stats_print();
 		ret = read(STDIN_FILENO, ptr, len);

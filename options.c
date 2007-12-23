@@ -212,7 +212,6 @@ int parse_options(int argc, char *argv[], const char *opts,
 {
 	int c, rc = 0;
 	uint64_t val;
-	ssize_t sndbuf = 0;
 	struct list_head saddrs;
 
 	if (argc && argv[0])
@@ -252,24 +251,6 @@ int parse_options(int argc, char *argv[], const char *opts,
 						 progname, val);
 				} else
 					ctxt->rc_msgsize = (uint32_t)val;
-				break;
-
-			case 'b':
-				rc = get_number(optarg, &val);
-				if (rc) {
-					verbosef(0, stderr,
-						 "%s: Invalid number: %s\n",
-						 progname, optarg);
-					break;
-				}
-
-				if (val > SSIZE_MAX) {
-					rc = -EINVAL;
-					verbosef(0, stderr,
-						 "%s: Socket buffer too large: %"PRIu64"\n",
-						 progname, val);
-				} else
-					sndbuf = (ssize_t)val;
 				break;
 
 			case 'l':
@@ -372,7 +353,6 @@ int parse_options(int argc, char *argv[], const char *opts,
 
 	ctxt->rc_saddr = list_entry(saddrs.prev, struct rds_endpoint,
 				    re_item);
-	ctxt->rc_saddr->re_sndbuf = sndbuf;
 
 out:
 	return rc;
@@ -402,16 +382,6 @@ int rds_bind(struct rds_context *ctxt)
 		close(e->re_fd);
 		e->re_fd = -1;
 		goto out;
-	}
-
-	if (e->re_sndbuf) {
-		rc = setsockopt(e->re_fd, SOL_RDS, RDS_SNDBUF,
-				&e->re_sndbuf, sizeof(e->re_sndbuf));
-		if (rc) {
-			rc = -errno;
-			verbosef(0, stderr, "%s: Unable to set send buffer size: %s\n", 
-				 progname, strerror(-rc));
-		}
 	}
 
 out:

@@ -54,9 +54,6 @@
 #ifndef SOL_RDS
 # define SOL_RDS OFFICIAL_SOL_RDS
 #endif
-#ifndef RDS_SNDBUF
-# define RDS_SNDBUF 2
-#endif
 
 #define RDS_TOOL_BASE_OPTS ":s:m:f:i:-:vqhV"
 #define RDS_SINK_OPTS
@@ -74,7 +71,6 @@ struct rds_endpoint {
     char *re_name;
     struct sockaddr_in re_addr;
     int re_fd;
-    uint32_t re_sndbuf;
 };
 
 struct rds_context {

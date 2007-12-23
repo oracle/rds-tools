@@ -14,7 +14,6 @@
 .Op Fl d Ar destination_address:destination_port
 .Op Fl f Ar input_file
 .Op Fl m Ar message_size
-.Op Fl b Ar send_buffer_size
 .Op Fl l Ar total_bytes
 .Op Fl i Ar interval
 
@@ -59,9 +58,6 @@ address in a round-robin fashion.
 .It Fl m Ar message_size
 Specifies the size of the messages that are sent down the RDS socket.  The default
 message size is 4k.  The message size must not be greater than the buffer size.
-.It Fl b Ar send_buffer_size
-Specifies the size the send buffer.  Each destination address gets its own
-send buffer.  The default send buffer size is typically 256k.
 .It Fl l Ar total_bytes
 Specifies the number of bytes that will be sent out the socket before rds-gen
 exits.  If this is not specified and rds-gen was given a source file then it

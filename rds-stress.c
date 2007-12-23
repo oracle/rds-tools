@@ -1644,6 +1644,8 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	if (listen(lfd, 255))
 		die_errno("listen() failed");
 
+	socklen = sizeof(sin);
+
 	fd = accept(lfd, (struct sockaddr *)&sin, &socklen);
 	if (fd < 0)
 		die_errno("accept() failed");

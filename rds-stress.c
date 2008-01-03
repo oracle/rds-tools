@@ -915,6 +915,10 @@ static int send_packet(int fd, struct task *t,
 	uint64_t *rdma_id_p = NULL;
 	ssize_t ret;
 
+	/* Make sure we always have the current sequence number.
+	 * When we send ACK packets, the seq that gets filled in is
+	 * stale. */
+	hdr->seq = ntohl(t->send_seq);
 	fill_hdr(buf, size, hdr);
 
 	memset(&msg, 0, sizeof(msg));

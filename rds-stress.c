@@ -797,9 +797,10 @@ static int rdma_complete(int fd, struct task *tasks,
 		wait_id = 0xffffffffffffffffULL;
 		for (i = 0; i < opts->nr_tasks; ++i, ++t) {
 			for (j = 0; j < opts->req_depth; ++j) {
-				if (t->rdma_id[j] <= done_id)
+				if (rds_rdma_id_cmp(t->rdma_id[j], <=, done_id))
 					t->rdma_id[j] = 0;
-				else if (t->rdma_id[j] < wait_id)
+				else
+				if (rds_rdma_id_cmp(t->rdma_id[j], <, wait_id))
 					wait_id = t->rdma_id[j];
 			}
 		}

@@ -152,5 +152,14 @@ struct rds_rdma_args {
 #define RDS_RDMA_ARGS_WRITE 1  /* read when not set */
 
 
+static inline int
+rds_rdma_id_sign(uint64_t id1, uint64_t id2)
+{
+	int64_t diff = id1 - id2;
+
+	return (diff < 0)? -1 : ((diff == 0)? 0 : 1);
+}
+
+#define rds_rdma_id_cmp(id1, cmp, id2)	(rds_rdma_id_sign((id1), (id2)) cmp 0)
 
 #endif /* __NET_RDS_H */

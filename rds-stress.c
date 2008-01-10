@@ -162,6 +162,8 @@ struct header {
 static int	opt_verify;
 static int	opt_tracing;
 
+static int	mrs_allocated = 0;
+
 #define trace(fmt...) do {		\
 	if (opt_tracing)		\
 		fprintf(stderr, fmt);	\
@@ -528,7 +530,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *ph
 	mr_args.phy_addr = ptr64(phyaddr);
 
 	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
-		die_errno("setsockopt(RDS_GET_MR) failed");
+		die_errno("setsockopt(RDS_GET_MR) failed (%u allocated)", mrs_allocated);
 
 	if (*phyaddr)
 		trace("RDS get_rdma_key(phys=%Lx) = %Lx\n",
@@ -538,6 +540,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *ph
 		trace("RDS get_rdma_key() = %Lx\n",
 				(unsigned long long) rkey);
 
+	mrs_allocated++;
 	return rkey;
 }
 
@@ -555,6 +558,7 @@ static void free_rdma_key(int fd, uint64_t key)
 #endif
 	if (setsockopt(fd, SOL_RDS, RDS_FREE_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_FREE_MR) failed");
+	mrs_allocated--;
 }
 
 
@@ -627,6 +631,7 @@ struct task {
 	/* RDMA related stuff */
 	uint64_t **		local_buf;
 	uint64_t **		rdma_buf;
+	uint64_t *		rdma_req_key;
 	uint64_t *		rdma_id;
 	uint32_t		buffid;
 	uint8_t			rdma_next_op;
@@ -653,6 +658,7 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 			t->local_buf[j] = (uint64_t *) base;
 			base += opts->rdma_size;
 
+			t->rdma_req_key[j] = 0;
 			t->rdma_id[j] = 0;
 		}
 	}
@@ -661,9 +667,16 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 		unsigned int rdma_size, unsigned int req_depth)
 {
-	uint64_t *rdma_addr;
+	uint64_t *rdma_addr, *rdma_key_p;
 
 	rdma_addr = t->rdma_buf[t->send_index];
+
+	rdma_key_p = &t->rdma_req_key[t->send_index];
+	if (*rdma_key_p == 0) {
+		uint64_t phyaddr_ignore;
+
+		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size, &phyaddr_ignore);
+	}
 
 	/* We alternate between RDMA READ and WRITEs */
 	hdr->rdma_op = t->rdma_next_op;
@@ -674,7 +687,7 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	hdr->rdma_addr = ptr64(rdma_addr);
 	hdr->rdma_phyaddr = 0;
 	hdr->rdma_size = rdma_size;
-	hdr->rdma_key = get_rdma_key(fd, hdr->rdma_addr, hdr->rdma_size, &hdr->rdma_phyaddr);
+	hdr->rdma_key = *rdma_key_p;
 
 	if (RDMA_OP_READ == hdr->rdma_op) {
 		if (opt_verify)
@@ -1003,6 +1016,7 @@ static int send_one(int fd, struct task *t,
 		return ret;
 
 	t->send_time[t->send_index] = start;
+	t->rdma_req_key[t->send_index] = 0; /* we consumed this key */
 	stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
 	stat_inc(&ctl->cur[S_SENDMSG_USECS],
 		 usec_sub(&stop, &start));
@@ -1208,6 +1222,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
 		tasks[i].dst_addr.sin_port = htons(opts->starting_port + 1 + i);
 		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
+		tasks[i].rdma_req_key = alloca(opts->req_depth * sizeof(uint64_t));
 		tasks[i].rdma_id = alloca(opts->req_depth * sizeof(uint64_t));
 		tasks[i].rdma_buf = alloca(opts->req_depth * sizeof(uint64_t *));
 		tasks[i].local_buf = alloca(opts->req_depth * sizeof(uint64_t *));

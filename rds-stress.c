@@ -527,7 +527,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *ph
 	mr_args.vec.addr = addr;
 	mr_args.vec.bytes = size;
 	mr_args.key_addr = ptr64(&rkey);
-	mr_args.phy_addr = ptr64(phyaddr);
+	mr_args.use_once = 1;
 
 	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_GET_MR) failed (%u allocated)", mrs_allocated);
@@ -894,9 +894,10 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		  (unsigned long long) hdr->rdma_addr,
 		  (unsigned long long) hdr->rdma_phyaddr);
 
-	/* XXX: match rdma_key with what we allocated? */
-
+#if 0
+	/* No need to do this - we allocated the key as use_once */
 	free_rdma_key(fd, hdr->rdma_key);
+#endif
 
 	/* if acking an rdma write request - then remote node wrote local host buffer
 	 * (data in) so count this as rdma data coming in (rdma_read) - else remote node read

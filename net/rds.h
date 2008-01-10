@@ -130,7 +130,8 @@ struct rds_barrier_args {
 struct rds_get_mr_args {
 	struct rds_iovec	vec;
 	uint64_t		key_addr;
-	uint64_t		phy_addr;
+	uint8_t			use_once;
+	uint8_t			reserved[7];
 };
 
 struct rds_free_mr_args {

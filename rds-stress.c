@@ -192,6 +192,23 @@ static unsigned long long parse_ull(char *ptr, unsigned long long max)
 	char *endptr;
 
 	val = strtoull(ptr, &endptr, 0);
+	switch (*endptr) {
+	case 'k': case 'K':
+		val <<= 10;
+		endptr++;
+		break;
+
+	case 'm': case 'M':
+		val <<= 20;
+		endptr++;
+		break;
+
+	case 'g': case 'G':
+		val <<= 30;
+		endptr++;
+		break;
+	}
+
 	if (*ptr && !*endptr && val <= max)
 		return val;
 

@@ -81,17 +81,20 @@ proceeding.
 A connection attempt is made to this address.  Once its complete and the
 options are sent over it then children will be created and work will proceed.
 .It Fl a Ar ack_bytes
-This specifies the size of the ack messages, in bytes.  There is a minimum size
+This specifies the size of the ack messages, in bytes. There is a minimum size
 which depends on the format of the ack messages, which may change over time.
+See section "Message Sizes" below.
 .It Fl q Ar request_bytes
 This specifies the size of the request messages, in bytes.
 It also has a minimum size which may change over time.
+See section "Message Sizes" below.
 .It Fl D Ar rdma_bytes
 RDSv3 is capable of transmitting part of a message via RDMA directly from
 application buffer to application buffer. This option enables RDMA support
 in rds-stress: request packets include parameters for an RDMA READ or WRITE
 operation, which the receiving process executes at the time the ACK packet
 is sent.
+See section "Message Sizes" below.
 .It Fl d Ar queue_depth
 Each child will try to maintain this many sent messages outstanding to each
 of its peers on the remote address.
@@ -125,6 +128,16 @@ occuring under high load.
 .El
 .Pp
 
+.Ss Message Sizes
+Options which set a message size (such as -a) specify a number of bytes
+by default. By appending \fBK\fP, \fBM\fP, or \fBG\fP, you can specify the size
+in kilobytes, megabytes or gigabytes, respectively. For instance,
+the following will run rds-stress with a message and ACK size of 1024
+bytes, and an RDMA message size of 1048576 bytes:
+.Pp
+.Dl rds-stress ... -q 1K -a 1K -D 1M
+.Pp
+.Pp
 .Sh OUTPUT
 Each parent outputs columns of statistics at a regular interval:
 .Bl -tag -width Ds

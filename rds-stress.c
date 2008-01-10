@@ -964,7 +964,7 @@ static int send_packet(int fd, struct task *t,
 
 	ret = sendmsg(fd, &msg, 0);
 	if (ret < 0) {
-		if (errno != EAGAIN)
+		if (errno != EAGAIN && errno != ENOBUFS)
 			die_errno("sendto() failed");
 		return ret;
 	}
@@ -1266,10 +1266,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
 				pfd.events |= POLLOUT;
 
-				/* Unfortunately there is no way how we can
-				 * tell the difference between the send queue
-				 * being full, and a particular destination
-				 * being congested.  In the former case,
+				/* If the send queue is full, we will see EAGAIN.
+				 * If a particular destination is congested, the
+				 * kernel will return ENOBUFS. In the former case,
 				 * there's no point in trying other destinations;
 				 * in the latter case we certainly want to try
 				 * sending to other tasks.
@@ -1277,6 +1276,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				 * It would be nice if we could map the congestion
 				 * map into user space :-)
 				 */
+				if (errno != ENOBUFS)
+					break;
 				continue;
 			}
 		}

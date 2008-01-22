@@ -138,6 +138,16 @@ struct rds_info_tcp_socket {
 /*
  * RDMA related types
  */
+
+/*
+ * This encapsulates a remote memory location.
+ * In the current implementation, it contains the R_Key
+ * of the remote memory region, and the offset into it
+ * (so that the application does not have to worry about
+ * alignment).
+ */
+typedef u_int64_t	rds_rdma_cookie_t;
+
 struct rds_iovec {
 	u_int64_t	addr;
 	u_int64_t	bytes;
@@ -158,7 +168,7 @@ struct rds_barrier_args {
 };
 
 struct rds_free_mr_args {
-	u_int64_t	key;
+	rds_rdma_cookie_t cookie;
 	u_int64_t	flags;
 };
 
@@ -166,8 +176,8 @@ struct rds_free_mr_args {
 #define RDS_FREE_MR_ARGS_INVALIDATE 1
 
 struct rds_rdma_args {
+	rds_rdma_cookie_t cookie;
 	struct rds_iovec remote_vec;
-	u_int64_t	r_key;
 	u_int64_t	local_vec_addr;
 	u_int64_t	nr_local;
 	u_int64_t	flags;

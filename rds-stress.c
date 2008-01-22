@@ -550,7 +550,7 @@ static void free_rdma_key(int fd, uint64_t key)
 
 	trace("RDS free_rdma_key(%Lx)\n", (unsigned long long) key);
 
-	mr_args.key = key;
+	mr_args.cookie = key;
 #if 1
 	mr_args.flags = 0;
 #else
@@ -868,7 +868,7 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 	 */
 	rdmap->remote_vec.addr = hdr->rdma_phyaddr;
 	rdmap->remote_vec.bytes = rdma_size;
-	rdmap->r_key = hdr->rdma_key;
+	rdmap->cookie = hdr->rdma_key;
 
 	/* read or write */
 	switch (hdr->rdma_op) {

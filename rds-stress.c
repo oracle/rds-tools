@@ -55,6 +55,7 @@ struct options {
 	uint8_t		tracing;
 	uint8_t		verify;
 	uint8_t		rdma_use_once;
+	uint8_t		rdma_use_get_mr;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -673,7 +674,7 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	rdma_addr = t->rdma_buf[t->send_index];
 
 	rdma_key_p = &t->rdma_req_key[t->send_index];
-	if (*rdma_key_p == 0) {
+	if (opt.rdma_use_get_mr && *rdma_key_p == 0) {
 		uint64_t phyaddr_ignore;
 
 		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size, &phyaddr_ignore);
@@ -902,6 +903,19 @@ static void rdma_build_cmsg_dest(struct msghdr *msg, rds_rdma_cookie_t rdma_dest
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_DEST, &rdma_dest, sizeof(rdma_dest));
 }
 
+static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size)
+{
+	static rds_rdma_cookie_t cookie;
+	struct rds_get_mr_args args;
+
+	args.vec.addr = addr;
+	args.vec.bytes = size;
+	args.key_addr = ptr64(&cookie);
+	args.use_once = 1;
+
+	rdma_put_cmsg(msg, RDS_CMSG_RDMA_MAP, &args, sizeof(args));
+}
+
 static void rdma_process_ack(int fd, struct header *hdr,
 		struct child_control *ctl)
 {
@@ -980,11 +994,19 @@ static int send_packet(int fd, struct task *t,
 	iov.iov_len = size;
 
 	/* If this is a REQ packet in which we pass the MR to the
-	 * peer, extract the R_Key and pass it on in the control
+	 * peer, extract the RDMA cookie and pass it on in the control
 	 * message for now. */
 	if (hdr->op == OP_REQ && hdr->rdma_op != 0) {
-		rdma_build_cmsg_dest(&msg, hdr->rdma_key);
-		hdr->rdma_key = 0;
+		if (hdr->rdma_key != 0) {
+			/* We used GET_MR to obtain a key */
+			rdma_build_cmsg_dest(&msg, hdr->rdma_key);
+			hdr->rdma_key = 0;
+		} else {
+			/* Use the RDMA_MAP cmsg to have sendmsg do the
+			 * mapping on the fly. */
+			rdma_build_cmsg_map(&msg, hdr->rdma_addr,
+					hdr->rdma_size);
+		}
 	}
 
 	/* If this is an ACK packet with RDMA, build the cmsg
@@ -1871,6 +1893,7 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 
 enum {
 	OPT_RDMA_USE_ONCE = 0x100,
+	OPT_RDMA_USE_GET_MR,
 };
 
 static struct option long_options[] = {
@@ -1890,6 +1913,7 @@ static struct option long_options[] = {
 { "trace",		no_argument,		NULL,	'V'	},
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
+{ "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
 
 { NULL }
 };
@@ -1922,6 +1946,7 @@ int main(int argc, char **argv)
 	opts.verify = 0;
 	opts.rdma_size = 0;
 	opts.rdma_use_once = 1;
+	opts.rdma_use_get_mr = 0;
 
         while(1) {
 		int c, index;
@@ -1978,6 +2003,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_USE_ONCE:
 				opts.rdma_use_once = parse_ull(optarg, 1);
+				break;
+			case OPT_RDMA_USE_GET_MR:
+				opts.rdma_use_get_mr = parse_ull(optarg, 1);
 				break;
                         case 'h':
                         case '?':

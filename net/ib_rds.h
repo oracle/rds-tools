@@ -45,7 +45,7 @@
 #define __be64	u_int64_t
 #endif
 
-#define RDS_IB_ABI_VERSION		0x300
+#define RDS_IB_ABI_VERSION		0x301
 
 /*
  * setsockopt/getsockopt for SOL_RDS
@@ -166,14 +166,13 @@ struct rds_iovec {
 
 struct rds_get_mr_args {
 	struct rds_iovec vec;
-	u_int64_t	key_addr;
-	u_int8_t	use_once;
-	u_int8_t	reserved[7];
+	u_int64_t	cookie_addr;
+	uint64_t	flags;
 };
 
 struct rds_barrier_args {
 	__be32		daddr;
-	u_int32_t	flags;
+	u_int64_t	flags;
 	u_int64_t	rdma_id_addr;
 	u_int64_t	wait_rdma_id;
 };
@@ -182,9 +181,6 @@ struct rds_free_mr_args {
 	rds_rdma_cookie_t cookie;
 	u_int64_t	flags;
 };
-
-/* Values for rds_free_mr_args.flags */
-#define RDS_FREE_MR_ARGS_INVALIDATE 1
 
 struct rds_rdma_args {
 	rds_rdma_cookie_t cookie;
@@ -195,8 +191,13 @@ struct rds_rdma_args {
 	u_int64_t	rdma_id_addr;
 };
 
-/* Values for rds_rdma_args.flags */
-#define RDS_RDMA_ARGS_WRITE	1  /* read when not set */
-#define RDS_RDMA_ARGS_FENCE	2  /* use FENCE for immediate send */
+/*
+ * Common set of flags for all RDMA related structs
+ */
+#define RDS_RDMA_READWRITE	0x0001
+#define RDS_RDMA_FENCE		0x0002	/* use FENCE for immediate send */
+#define RDS_RDMA_INVALIDATE	0x0004	/* invalidate R_Key after freeing MR */
+#define RDS_RDMA_USE_ONCE	0x0008	/* free MR after use */
+#define RDS_RDMA_DONTWAIT	0x0010	/* Don't wait in SET_BARRIER */
 
 #endif /* IB_RDS_H */

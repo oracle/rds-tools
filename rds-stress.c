@@ -520,29 +520,26 @@ static uint64_t wait_for_rdma(int fd, struct sockaddr_in *sin, uint64_t wait_rdm
 	return rdma_id;
 }
 
-static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *phyaddr)
+static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size)
 {
-	uint64_t rkey = 0;
+	uint64_t cookie = 0;
 	struct rds_get_mr_args mr_args;
 
 	mr_args.vec.addr = addr;
 	mr_args.vec.bytes = size;
-	mr_args.key_addr = ptr64(&rkey);
-	mr_args.use_once = !!opt.rdma_use_once;
+	mr_args.cookie_addr = ptr64(&cookie);
+	mr_args.flags = RDS_RDMA_READWRITE; /* for now, always assume r/w */
+	if (opt.rdma_use_once)
+		mr_args.flags |= RDS_RDMA_USE_ONCE;
 
 	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_GET_MR) failed (%u allocated)", mrs_allocated);
 
-	if (*phyaddr)
-		trace("RDS get_rdma_key(phys=%Lx) = %Lx\n",
-				(unsigned long long) *phyaddr,
-				(unsigned long long) rkey);
-	else
-		trace("RDS get_rdma_key() = %Lx\n",
-				(unsigned long long) rkey);
+	trace("RDS get_rdma_key() = %Lx\n",
+				(unsigned long long) cookie);
 
 	mrs_allocated++;
-	return rkey;
+	return cookie;
 }
 
 static void free_rdma_key(int fd, uint64_t key)
@@ -674,11 +671,8 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	rdma_addr = t->rdma_buf[t->send_index];
 
 	rdma_key_p = &t->rdma_req_key[t->send_index];
-	if (opt.rdma_use_get_mr && *rdma_key_p == 0) {
-		uint64_t phyaddr_ignore;
-
-		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size, &phyaddr_ignore);
-	}
+	if (opt.rdma_use_get_mr && *rdma_key_p == 0)
+		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size);
 
 	/* We alternate between RDMA READ and WRITEs */
 	hdr->rdma_op = t->rdma_next_op;
@@ -813,7 +807,7 @@ static int rdma_complete(int fd, struct task *tasks,
 		/* Loop back and call RDS_BARRIER once more, so that
 		 * we register the next RDMA ID for which we want to
 		 * get woken up. */
-		args.flags = MSG_DONTWAIT;
+		args.flags = RDS_RDMA_DONTWAIT;
 	}
 
 	return 0;
@@ -881,7 +875,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 	/* read or write */
 	switch (hdr->rdma_op) {
 	case RDMA_OP_WRITE:
-		args.flags = RDS_RDMA_ARGS_WRITE;
+		args.flags = RDS_RDMA_READWRITE;
 
 		if (opt.verify)
 			rds_fill_buffer(local_buf, rdma_size, hdr->rdma_pattern);
@@ -893,7 +887,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 	}
 
 	/* Always fence off subsequent SENDs */
-	args.flags |= RDS_RDMA_ARGS_FENCE;
+	args.flags |= RDS_RDMA_FENCE;
 
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_ARGS, &args, sizeof(args));
 }
@@ -910,8 +904,8 @@ static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size
 
 	args.vec.addr = addr;
 	args.vec.bytes = size;
-	args.key_addr = ptr64(&cookie);
-	args.use_once = 1;
+	args.cookie_addr = ptr64(&cookie);
+	args.flags = RDS_RDMA_USE_ONCE | RDS_RDMA_READWRITE; /* for now, always assume r/w */
 
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_MAP, &args, sizeof(args));
 }

@@ -62,8 +62,19 @@
  *	Request a RDMA transfer to/from the specified
  *	memory ranges.
  *	The cmsg_data is a struct rds_rdma_args.
+ * RDS_CMSG_RDMA_DEST (recvmsg, sendmsg)
+ *	Kernel informs application about intended
+ *	source/destination of a RDMA transfer
+ * RDS_CMSG_RDMA_MAP (sendmsg)
+ *	Application asks kernel to map the given
+ *	memory range into a IB MR, and send the
+ *	R_Key along in an RDS extension header.
+ *	The cmsg_data is a struct rds_get_mr_args,
+ *	the same as for the GET_MR setsockopt.
  */
 #define RDS_CMSG_RDMA_ARGS	1
+#define RDS_CMSG_RDMA_DEST	2
+#define RDS_CMSG_RDMA_MAP	3
 
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001

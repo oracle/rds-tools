@@ -897,6 +897,11 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_ARGS, &args, sizeof(args));
 }
 
+static void rdma_build_cmsg_dest(struct msghdr *msg, rds_rdma_cookie_t rdma_dest)
+{
+	rdma_put_cmsg(msg, RDS_CMSG_RDMA_DEST, &rdma_dest, sizeof(rdma_dest));
+}
+
 static void rdma_process_ack(int fd, struct header *hdr,
 		struct child_control *ctl)
 {
@@ -974,6 +979,14 @@ static int send_packet(int fd, struct task *t,
 	iov.iov_base = buf;
 	iov.iov_len = size;
 
+	/* If this is a REQ packet in which we pass the MR to the
+	 * peer, extract the R_Key and pass it on in the control
+	 * message for now. */
+	if (hdr->op == OP_REQ && hdr->rdma_op != 0) {
+		rdma_build_cmsg_dest(&msg, hdr->rdma_key);
+		hdr->rdma_key = 0;
+	}
+
 	/* If this is an ACK packet with RDMA, build the cmsg
 	 * header that goes with it. */
 	if (hdr->op == OP_ACK && hdr->rdma_op != 0) {
@@ -986,7 +999,6 @@ static int send_packet(int fd, struct task *t,
 		rdma_id_p = &t->rdma_id[qindex];
 		rdma_drain(fd, t, rdma_id_p);
 		rdma_build_cmsg_xfer(&msg, hdr, t->local_buf[qindex], rdma_id_p);
-
 	}
 
 	ret = sendmsg(fd, &msg, 0);
@@ -1107,9 +1119,12 @@ eagain:
 
 static int recv_message(int fd,
 		void *buffer, size_t size,
+		rds_rdma_cookie_t *cookie,
 		struct sockaddr_in *sin,
 		struct timeval *tstamp)
 {
+	struct cmsghdr *cmsg;
+	char cmsgbuf[256];
 	struct msghdr msg;
 	struct iovec iov;
 	ssize_t ret;
@@ -1119,6 +1134,8 @@ static int recv_message(int fd,
 	msg.msg_namelen = sizeof(struct sockaddr_in);
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
+	msg.msg_control = cmsgbuf;
+	msg.msg_controllen = sizeof(cmsgbuf);
 	iov.iov_base = buffer;
 	iov.iov_len = size;
 
@@ -1128,10 +1145,20 @@ static int recv_message(int fd,
 	if (ret < 0)
 		return ret;
 	if (ret < sizeof(struct header))
-		die("recvfrom() returned short data: %zd", ret);
+		die("recvmsg() returned short data: %zd", ret);
 	if (msg.msg_namelen < sizeof(struct sockaddr_in))
 		die("socklen = %d < sizeof(sin) (%zu)\n",
 		    msg.msg_namelen, sizeof(struct sockaddr_in));
+
+	/* See if the message comes with a RDMA destination */
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		if (cmsg->cmsg_level == SOL_RDS
+		 && cmsg->cmsg_type == RDS_CMSG_RDMA_DEST) {
+			if (cmsg->cmsg_len < CMSG_LEN(sizeof(*cookie)))
+				die("RDS_CMSG_RDMA_DEST data too small");
+			memcpy(cookie, CMSG_DATA(cmsg), sizeof(*cookie));
+		}
+	}
 	return ret;
 }
 
@@ -1140,6 +1167,7 @@ static int recv_one(int fd, struct task *tasks,
 		struct child_control *ctl)
 {
 	char buf[max(opts->req_size, opts->ack_size)];
+	rds_rdma_cookie_t rdma_dest = 0;
 	struct sockaddr_in sin;
 	struct header hdr, *in_hdr;
 	struct timeval tstamp;
@@ -1148,7 +1176,7 @@ static int recv_one(int fd, struct task *tasks,
 	int task_index;
 	ssize_t ret;
 
-	ret = recv_message(fd, buf, sizeof(buf), &sin, &tstamp);
+	ret = recv_message(fd, buf, sizeof(buf), &rdma_dest, &sin, &tstamp);
 	if (ret < 0)
 		return ret;
 
@@ -1219,6 +1247,8 @@ static int recv_one(int fd, struct task *tasks,
 		 * anyway, so that's a good place for send_ack
 		 * to pick them up from.
 		 */
+		if (rdma_dest)
+			in_hdr->rdma_key = rdma_dest;
 		if (in_hdr->rdma_key) {
 			rdma_validate(in_hdr, opts);
 			rdma_build_ack(ack_hdr, in_hdr);

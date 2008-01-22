@@ -821,18 +821,35 @@ static int rdma_complete(int fd, struct task *tasks,
 #define MSG_MAXIOVLEN 2
 
 /*
+ * Add a control message to the outgoing message
+ */
+static void rdma_put_cmsg(struct msghdr *msg, int type,
+			const void *ptr, size_t size)
+{
+	static char ctlbuf[1024];
+	struct cmsghdr *cmsg;
+
+	msg->msg_control = ctlbuf;
+	msg->msg_controllen = CMSG_SPACE(size);
+
+	cmsg = CMSG_FIRSTHDR(msg);
+	cmsg->cmsg_level = SOL_RDS;
+	cmsg->cmsg_type = type;
+	cmsg->cmsg_len = CMSG_LEN(size);
+	memcpy(CMSG_DATA(cmsg), ptr, size);
+}
+
+/*
  * This sets up all the fields for an RDMA transfer.
  * The request is passed as a control message along with
  * the ACK packet.
  */
-static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
+static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 		void *local_buf, uint64_t *rdma_id_p)
 {
-	static char ctlbuf[CMSG_SPACE(sizeof(struct rds_rdma_args))];
 	static struct rds_iovec iov;
+	struct rds_rdma_args args;
 	unsigned int rdma_size;
-	struct rds_rdma_args *rdmap;
-	struct cmsghdr *cmsg;
 
 	rdma_size = hdr->rdma_size;	/* ntohl? */
 
@@ -841,51 +858,43 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 			(unsigned long long) hdr->rdma_phyaddr,
 			rdma_size, local_buf);
 
-	msg->msg_control = ctlbuf;
-	msg->msg_controllen = sizeof(ctlbuf);
-
-	cmsg = CMSG_FIRSTHDR(msg);
-	cmsg->cmsg_level = SOL_RDS;
-	cmsg->cmsg_type = RDS_CMSG_RDMA_ARGS;
-	cmsg->cmsg_len = CMSG_LEN(sizeof(struct rds_rdma_args));
-	msg->msg_controllen = cmsg->cmsg_len;
-
 	/* rdma args */
-	rdmap = (struct rds_rdma_args *) CMSG_DATA(cmsg);
-	memset(rdmap, 0, sizeof(*rdmap));
+	memset(&args, 0, sizeof(args));
 
 	/* Set up the iovec pointing to the RDMA buffer */
-	rdmap->local_vec_addr = (uint64_t) &iov;
-	rdmap->nr_local = 1;
+	args.local_vec_addr = (uint64_t) &iov;
+	args.nr_local = 1;
 	iov.addr = ptr64(local_buf);
 	iov.bytes = rdma_size;
 
 	/* sendmsg will fill in the RDMA ID assigned to this operation */
-	rdmap->rdma_id_addr = ptr64(rdma_id_p);
+	args.rdma_id_addr = ptr64(rdma_id_p);
 
 	/* The remote could either give us a physical address, or
 	 * an index into a zero-based FMR. Either way, we just copy it.
 	 */
-	rdmap->remote_vec.addr = hdr->rdma_phyaddr;
-	rdmap->remote_vec.bytes = rdma_size;
-	rdmap->cookie = hdr->rdma_key;
+	args.remote_vec.addr = hdr->rdma_phyaddr;
+	args.remote_vec.bytes = rdma_size;
+	args.cookie = hdr->rdma_key;
 
 	/* read or write */
 	switch (hdr->rdma_op) {
 	case RDMA_OP_WRITE:
-		rdmap->flags = RDS_RDMA_ARGS_WRITE;
+		args.flags = RDS_RDMA_ARGS_WRITE;
 
 		if (opt.verify)
 			rds_fill_buffer(local_buf, rdma_size, hdr->rdma_pattern);
 		break;
 
 	case RDMA_OP_READ:
-		rdmap->flags = 0;
+		args.flags = 0;
 		break;
 	}
 
 	/* Always fence off subsequent SENDs */
-	rdmap->flags |= RDS_RDMA_ARGS_FENCE;
+	args.flags |= RDS_RDMA_ARGS_FENCE;
+
+	rdma_put_cmsg(msg, RDS_CMSG_RDMA_ARGS, &args, sizeof(args));
 }
 
 static void rdma_process_ack(int fd, struct header *hdr,
@@ -976,7 +985,7 @@ static int send_packet(int fd, struct task *t,
 		}
 		rdma_id_p = &t->rdma_id[qindex];
 		rdma_drain(fd, t, rdma_id_p);
-		rdma_build_cmsg(&msg, hdr, t->local_buf[qindex], rdma_id_p);
+		rdma_build_cmsg_xfer(&msg, hdr, t->local_buf[qindex], rdma_id_p);
 
 	}
 

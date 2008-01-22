@@ -1105,6 +1105,36 @@ eagain:
 	return -1;
 }
 
+static int recv_message(int fd,
+		void *buffer, size_t size,
+		struct sockaddr_in *sin,
+		struct timeval *tstamp)
+{
+	struct msghdr msg;
+	struct iovec iov;
+	ssize_t ret;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name = (struct sockaddr *) sin;
+	msg.msg_namelen = sizeof(struct sockaddr_in);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	iov.iov_base = buffer;
+	iov.iov_len = size;
+
+	ret = recvmsg(fd, &msg, MSG_DONTWAIT);
+	gettimeofday(tstamp, NULL);
+
+	if (ret < 0)
+		return ret;
+	if (ret < sizeof(struct header))
+		die("recvfrom() returned short data: %zd", ret);
+	if (msg.msg_namelen < sizeof(struct sockaddr_in))
+		die("socklen = %d < sizeof(sin) (%zu)\n",
+		    msg.msg_namelen, sizeof(struct sockaddr_in));
+	return ret;
+}
+
 static int recv_one(int fd, struct task *tasks,
 			struct options *opts,
 		struct child_control *ctl)
@@ -1112,25 +1142,15 @@ static int recv_one(int fd, struct task *tasks,
 	char buf[max(opts->req_size, opts->ack_size)];
 	struct sockaddr_in sin;
 	struct header hdr, *in_hdr;
-	socklen_t socklen;
 	struct timeval tstamp;
 	struct task *t;
 	uint16_t expect_index;
 	int task_index;
 	ssize_t ret;
 
-	socklen = sizeof(struct sockaddr_in);
-	ret = recvfrom(fd, buf, max(opts->req_size, opts->ack_size), 0,
-			     (struct sockaddr *) &sin, &socklen);
-	gettimeofday(&tstamp, NULL);
-
+	ret = recv_message(fd, buf, sizeof(buf), &sin, &tstamp);
 	if (ret < 0)
 		return ret;
-	if (ret < sizeof(struct header))
-		die("recvfrom() returned short data: %zd", ret);
-	if (socklen < sizeof(struct sockaddr_in))
-		die("socklen = %d < sizeof(sin) (%zu)\n",
-		    socklen, sizeof(struct sockaddr_in));
 
 	/* check the incoming sequence number */
 	task_index = ntohs(sin.sin_port) - opts->starting_port - 1;

@@ -9,7 +9,7 @@ all: all-programs
 CFLAGS = -O2 -Wall
 CPPFLAGS = -DDEBUG_EXE -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
-HEADERS = kernel-list.h rdstool.h pfhack.h net/rds.h
+HEADERS = kernel-list.h rdstool.h pfhack.h net/rds.h net/ib_rds.h
 COMMON_SOURCES = options.c stats.c pfhack.c
 SOURCES = $(addsuffix .c,$(PROGRAMS)) $(COMMON_SOURCES)
 CLEAN_OBJECTS = $(addsuffix .o,$(PROGRAMS)) $(subst .c,.o,$(COMMON_SOURCES))

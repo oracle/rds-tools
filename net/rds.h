@@ -151,7 +151,7 @@ struct rds_rdma_args {
 };
 /* Values for rds_rdma_args.flags */
 #define RDS_RDMA_ARGS_WRITE 1  /* read when not set */
-
+#define RDS_RDMA_ARGS_FENCE	2	/* fence off subsequent sends */
 
 static inline int
 rds_rdma_id_sign(uint64_t id1, uint64_t id2)

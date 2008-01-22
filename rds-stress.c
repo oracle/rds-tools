@@ -883,6 +883,9 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 		rdmap->flags = 0;
 		break;
 	}
+
+	/* Always fence off subsequent SENDs */
+	rdmap->flags |= RDS_RDMA_ARGS_FENCE;
 }
 
 static void rdma_process_ack(int fd, struct header *hdr,

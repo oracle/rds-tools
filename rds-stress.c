@@ -649,6 +649,7 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 	base = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0);
 	if (base == MAP_FAILED)
 		die_errno("alloc_rdma_buffers: mmap failed");
+	memset(base, 0x2f, len);
 
 	for (i = 0; i < opts->nr_tasks; ++i, ++t) {
 		for (j = 0; j < opts->req_depth; ++j) {

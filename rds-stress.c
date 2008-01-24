@@ -61,6 +61,8 @@ struct options {
 	uint8_t		suppress_warnings;
 } __attribute__((packed));
 
+static struct options	opt;
+
 struct counter {
 	uint64_t	nr;
 	uint64_t	sum;
@@ -158,15 +160,10 @@ struct header {
 	exit(1);						\
 } while (0)
 
-/* These are global, so that we don't have to pass struct options
- * into every function */
-static int	opt_verify;
-static int	opt_tracing;
-
 static int	mrs_allocated = 0;
 
 #define trace(fmt...) do {		\
-	if (opt_tracing)		\
+	if (opt.tracing)		\
 		fprintf(stderr, fmt);	\
 } while (0)
 
@@ -309,7 +306,7 @@ static void init_msg_pattern(struct options *opts)
 static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
 {
 	memcpy(message, hdr, sizeof(*hdr));
-	if (opt_verify)
+	if (opt.verify)
 		memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
 }
 
@@ -367,7 +364,7 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 		return 1;
 	}
 
-	if (opt_verify
+	if (opt.verify
 	 && memcmp(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr))) {
 		unsigned char *p = message + sizeof(*hdr);
 		unsigned int i, count = 0;
@@ -691,14 +688,14 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	hdr->rdma_key = *rdma_key_p;
 
 	if (RDMA_OP_READ == hdr->rdma_op) {
-		if (opt_verify)
+		if (opt.verify)
 			rds_fill_buffer(rdma_addr, rdma_size, hdr->rdma_pattern);
 		trace("Requesting RDMA read for pattern %Lx "
 				"local addr to rdma read %p\n",
 				(unsigned long long) hdr->rdma_pattern,
 				rdma_addr);
 	} else {
-		if (opt_verify)
+		if (opt.verify)
 			rds_fill_buffer(rdma_addr, rdma_size, 0);
 		trace("Requesting RDMA write for pattern %Lx "
 				"local addr to rdma write %p\n",
@@ -875,7 +872,7 @@ static void rdma_build_cmsg(struct msghdr *msg, const struct header *hdr,
 	case RDMA_OP_WRITE:
 		rdmap->flags = RDS_RDMA_ARGS_WRITE;
 
-		if (opt_verify)
+		if (opt.verify)
 			rds_fill_buffer(local_buf, rdma_size, hdr->rdma_pattern);
 		break;
 
@@ -911,7 +908,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		 */
 		stat_inc(&ctl->cur[S_RDMA_READ_BYTES],  hdr->rdma_size);
 
-		if (opt_verify) {
+		if (opt.verify) {
 			/* This funny looking cast avoids compile warnings
 			 * on 32bit platforms. */
 			rds_compare_buffer((void *)(unsigned long) hdr->rdma_addr,
@@ -1211,8 +1208,6 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
 	struct timeval start;
-
-	opt_tracing = opts->tracing;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port + 1 + id);
@@ -1705,6 +1700,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	 */
 	opts->send_addr = opts->receive_addr;
 	opts->receive_addr = addr;
+	opt = *opts;
 
 	ctl = start_children(opts);
 
@@ -1946,6 +1942,7 @@ int main(int argc, char **argv)
 	if (opts.rdma_size)
 		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
 
+	opt = opts;
 	return active_parent(&opts, soak_arr);
 }
 

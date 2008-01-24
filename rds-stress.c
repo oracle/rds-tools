@@ -368,10 +368,10 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 	if (opt.verify
 	 && memcmp(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr))) {
 		unsigned char *p = message + sizeof(*hdr);
-		unsigned int i, count = 0;
+		unsigned int i, count = 0, total = bytes - sizeof(*hdr);
 		int offset = -1;
 
-		for (i = 0; i < bytes - sizeof(*hdr); ++i) {
+		for (i = 0; i < total; ++i) {
 			if (p[i] != msg_pattern[i]) {
 				if (offset < 0)
 					offset = i;
@@ -380,8 +380,9 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 		}
 
 		printf("An incoming message has a corrupted payload at offset %u; "
-				"%u bytes corrupted\n",
-				offset, count);
+				"%u out of %u bytes corrupted\n",
+				offset, count, total);
+		return 1;
 	}
 
 	return 0;
@@ -1855,6 +1856,7 @@ int main(int argc, char **argv)
 	opts.run_time = 0;
 	opts.summary_only = 0;
 	opts.tracing = 0;
+	opts.verify = 0;
 	opts.rdma_size = 0;
 	opts.rdma_use_once = 1;
 

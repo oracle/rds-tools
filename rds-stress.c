@@ -56,6 +56,7 @@ struct options {
 	uint8_t		verify;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
+	unsigned int	rdma_alignment;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -171,6 +172,8 @@ static int	mrs_allocated = 0;
 
 #define min(a,b) (a < b ? a : b)
 #define max(a,b) (a > b ? a : b)
+
+static unsigned long	sys_page_size;
 
 /* This macro casts a pointer to uint64_t without producing
    warnings on either 32bit or 64bit platforms. At least
@@ -643,11 +646,12 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 
 	/* We use mmap here rather than malloc, because it is always
 	 * page aligned. */
-	len = 2 * opts->nr_tasks * opts->req_depth * opts->rdma_size;
+	len = 2 * opts->nr_tasks * opts->req_depth * opts->rdma_size + sys_page_size;
 	base = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0);
 	if (base == MAP_FAILED)
 		die_errno("alloc_rdma_buffers: mmap failed");
 	memset(base, 0x2f, len);
+	base += opts->rdma_alignment;
 
 	for (i = 0; i < opts->nr_tasks; ++i, ++t) {
 		for (j = 0; j < opts->req_depth; ++j) {
@@ -1888,6 +1892,7 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 enum {
 	OPT_RDMA_USE_ONCE = 0x100,
 	OPT_RDMA_USE_GET_MR,
+	OPT_RDMA_ALIGNMENT,
 };
 
 static struct option long_options[] = {
@@ -1908,6 +1913,7 @@ static struct option long_options[] = {
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
+{ "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 
 { NULL }
 };
@@ -1921,6 +1927,12 @@ int main(int argc, char **argv)
 	/* Discover PF_RDS/SOL_RDS once, and be done with it */
 	(void) discover_pf_rds();
 	(void) discover_sol_rds();
+#endif
+
+#ifdef _SC_PAGESIZE
+	sys_page_size = sysconf(_SC_PAGESIZE);
+#else
+	sys_page_size = 4096;
 #endif
 
 	/* We really want to see output when we redirect
@@ -1941,6 +1953,7 @@ int main(int argc, char **argv)
 	opts.rdma_size = 0;
 	opts.rdma_use_once = 1;
 	opts.rdma_use_get_mr = 0;
+	opts.rdma_alignment = 0;
 
         while(1) {
 		int c, index;
@@ -2000,6 +2013,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_USE_GET_MR:
 				opts.rdma_use_get_mr = parse_ull(optarg, 1);
+				break;
+			case OPT_RDMA_ALIGNMENT:
+				opts.rdma_alignment = parse_ull(optarg, sys_page_size);
 				break;
                         case 'h':
                         case '?':

@@ -20,6 +20,7 @@
 #include <sys/poll.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <getopt.h>
 #include "net/rds.h"
 
 #ifdef DYNAMIC_PF_RDS
@@ -1808,6 +1809,25 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 		die("%s must be at least %u bytes\n", desc, max);
 }
 
+static struct option long_options[] = {
+{ "req-bytes",		required_argument,	NULL,	'q'	},
+{ "ack-bytes",		required_argument,	NULL,	'a'	},
+{ "rdma-bytes",		required_argument,	NULL,	'D'	},
+{ "tasks",		required_argument,	NULL,	't'	},
+{ "depth",		required_argument,	NULL,	'd'	},
+{ "recv-addr",		required_argument,	NULL,	'r'	},
+{ "send-addr",		required_argument,	NULL,	's'	},
+{ "port",		required_argument,	NULL,	'p'	},
+{ "time",		required_argument,	NULL,	'T'	},
+{ "report-cpu",		no_argument,		NULL,	'c'	},
+{ "report-summary",	no_argument,		NULL,	'z'	},
+{ "rtprio",		no_argument,		NULL,	'R'	},
+{ "verify",		no_argument,		NULL,	'v'	},
+{ "trace",		no_argument,		NULL,	'V'	},
+
+{ NULL }
+};
+
 int main(int argc, char **argv)
 {
 	struct options opts;
@@ -1836,9 +1856,10 @@ int main(int argc, char **argv)
 	opts.rdma_size = 0;
 
         while(1) {
-		int c;
+		int c, index;
 
-		c = getopt(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:vVz");
+		c = getopt_long(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:vVz",
+				long_options, &index);
                 if (c == -1)
                         break;
 

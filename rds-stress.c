@@ -54,6 +54,7 @@ struct options {
 	uint8_t		rtprio;
 	uint8_t		tracing;
 	uint8_t		verify;
+	uint8_t		rdma_use_once;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -525,7 +526,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size,  uint64_t *ph
 	mr_args.vec.addr = addr;
 	mr_args.vec.bytes = size;
 	mr_args.key_addr = ptr64(&rkey);
-	mr_args.use_once = 1;
+	mr_args.use_once = !!opt.rdma_use_once;
 
 	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_GET_MR) failed (%u allocated)", mrs_allocated);
@@ -892,10 +893,9 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		  (unsigned long long) hdr->rdma_addr,
 		  (unsigned long long) hdr->rdma_phyaddr);
 
-#if 0
-	/* No need to do this - we allocated the key as use_once */
-	free_rdma_key(fd, hdr->rdma_key);
-#endif
+	/* Need to free the MR unless allocated with use_once */
+	if (!opt.rdma_use_once)
+		free_rdma_key(fd, hdr->rdma_key);
 
 	/* if acking an rdma write request - then remote node wrote local host buffer
 	 * (data in) so count this as rdma data coming in (rdma_read) - else remote node read
@@ -1805,6 +1805,10 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 		die("%s must be at least %u bytes\n", desc, max);
 }
 
+enum {
+	OPT_RDMA_USE_ONCE = 0x100,
+};
+
 static struct option long_options[] = {
 { "req-bytes",		required_argument,	NULL,	'q'	},
 { "ack-bytes",		required_argument,	NULL,	'a'	},
@@ -1820,6 +1824,8 @@ static struct option long_options[] = {
 { "rtprio",		no_argument,		NULL,	'R'	},
 { "verify",		no_argument,		NULL,	'v'	},
 { "trace",		no_argument,		NULL,	'V'	},
+
+{ "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 
 { NULL }
 };
@@ -1850,6 +1856,7 @@ int main(int argc, char **argv)
 	opts.summary_only = 0;
 	opts.tracing = 0;
 	opts.rdma_size = 0;
+	opts.rdma_use_once = 1;
 
         while(1) {
 		int c, index;
@@ -1903,6 +1910,9 @@ int main(int argc, char **argv)
 				break;
 			case 'V':
 				opts.tracing = 1;
+				break;
+			case OPT_RDMA_USE_ONCE:
+				opts.rdma_use_once = parse_ull(optarg, 1);
 				break;
                         case 'h':
                         case '?':

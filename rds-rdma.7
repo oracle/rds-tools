@@ -1,0 +1,427 @@
+.TH "RDS zerocopy" 7
+.SH NAME
+RDS zerocopy \- Interface for RDMA over RDS
+.SH DESCRIPTION
+This manual page describes the zerocopy interface of RDS, which
+was added in RDSv3. For a description of the basic RDS interface,
+please refer to
+.BR rds (7).
+.PP
+The principal mode of operation for RDS zerocopy is like this:
+one participant (the client) wishes to initiate a direct transfer
+to or from some area of memory in its process address space.
+This memory does not have to be aligned.
+.PP
+The client obtains a handle for this region of memory, and
+passes it to the other participant (the server). This is called
+the RDMA cookie. To the application, the cookie is an opaque 64bit
+data type.
+.PP
+The client sends this handle to
+the server application, along with other details of the RDMA
+request (such as which data to transfer to that memory area).
+Throughout the following discussion, we will refer to this
+message as the RDMA request.
+.PP
+The server uses this RDMA cookie to initiate the requested RDMA
+transfer. The RDMA transfer is combined atomically with a
+normal RDS message, which is delivered to the client. This
+message is called the RDMA ACK throughout the following.  Atomic
+in this context means that either both the RDMA succeeds and the
+RDMA ACK is delivered, or neither succeeds.
+.PP
+Thus, when the client receives the RDMA ACK, it knows that
+the RDMA has completed successfully. It can then release the
+RDMA cookie for this memory region, if it wishes to.
+.PP
+RDMA operations are not reliable, in the sense that unlike normal
+RDS messages, RDS RDMA operations may fail, and get
+dropped.
+.\"-------------------------------
+.SH INTERFACE
+The interface is currently based on control messages (ancillary
+data) sent or received via the
+.BR sendmsg (2)
+and
+.BR recvmsg (2)
+system calls. Optionally, an older interface can be used that
+is based on the
+.BR setsockopt (2)
+system call. However, we recommend using control messages, as
+this reduces the number of system calls required.
+.\"-------------------------------
+.SS Control message interface
+With the control message interface, the RDMA cookie is passed to
+the server out-of-band, included in an extension header attached
+to the RDS message.
+.PP
+The following outlines the mode of operation; the data
+types used will be specified in details in a subsequent section.
+.PP
+Initially, the client will send RDMA requests along with a
+.B RDS_CMSG_RDMA_MAP
+control message. The control message contains the address and
+length of the memory region for which to obtain a handle, some
+flags, and a pointer to a memory location (in the caller's address
+space) where the kernel will store the RDMA cookie.
+.PP
+Alternatively, if the application has already obtained a RDMA cookie
+for the memory range it wants to RDMA to/from, it can hand this
+cookie to the kernel using the
+.B RDS_CMSG_RDMA_DEST
+control message.
+.PP
+Either way, the kernel will include the resulting RDMA cookie
+in an extension header that is transmitted as part of the RDMA
+request to the server.
+.PP
+When the server receives the RDMA request, the kernel will deliver the
+cookie wrapped inside a
+.B RDS_CMSG_RDMA_DEST
+control message.
+.PP
+The server then initiates the data transfer by sending the RDMA ACK message
+along with a
+.B RDS_CMSG_RDMA_ARGS
+control message. This message contains the RDMA cookie, and the local
+memory to copy to or from.
+.PP
+The server process may request a notification when an RDMA operation
+completes. Notifications are delivered as a
+.B RDS_CMSG_RDMA_STATUS
+control messages. When an application calls
+.BR recvmsg (2),
+it will either receive a regular RDS message (possibly with other RDMA
+related control messages), or an empty message with one or more
+status control messages.
+.PP
+In addition, applications
+When an RDMA operation fails for some reason and is discarded, the
+application can ask to receive notifications for failed messages as
+well, regardless of whether it asked for success notification of an
+individual message or not. This behavior is turned on by setting the
+.B RDS_RECVERR
+socket option.
+.\"-------------------------------
+.SS Setsockopt interface
+In addition to the control message interface, RDS allows a process
+to register and release memory ranges for RDMA through calls to
+.BR setsockopt (2).
+.TP
+.B RDS_GET_MR
+To obtain a RDMA cookie for a given memory range, the application can
+use
+.BR setsockopt " with " RDS_GET_MR .
+This operates essentially the same way as the
+.B RDS_CMSG_RDMA_MAP
+control message: the argument contains the address and length of the
+memory range to be registered, and a pointer to a RDMA cookie variable,
+in which the system call will store the cookie for the registered
+range.
+.TP
+.B RDS_FREE_MR
+Memory ranges can be released by calling
+.BR setsockopt " with " RDS_FREE_MR ,
+giving the RDMA cookie and additional flags as arguments.
+.TP
+.B RDS_RECVERR
+This is a boolean option which can be set as well as queried
+(using
+.BR getsockopt ).
+When enabled, RDS will send RDMA notification messages to
+the application for any RDMA operation that fails. This
+option defaults to off.
+.PP
+For all of these calls, the
+.B level
+argument to
+.B setsockopt
+is
+.BR SOL_RDS .
+.PP
+.\"-------------------------------
+.SH RDMA MACROS AND TYPES
+.fi
+.TP
+.B RDMA cookie
+.nf
+typedef u_int64_t       rds_rdma_cookie_t
+.fi
+.IP
+This encapsulates a memory location in the client process. In the
+current implementation, it contains the R_Key of the remote memory
+region, and the offset into it (so that the application does not
+have to worry about alignment.
+.IP
+The RDMA cookie is used in several struct types described below.
+The
+.BR RDS_CMSG_RDMA_DEST
+control message contains a rds_rdma_cookie_t all by itself as payload.
+.TP
+.B Mapping arguments
+The following data type is used with
+.B RDS_CMSG_RDMA_MAP
+control messages and with the
+.B RDS_GET_MR
+socket option:
+.IP
+.nf
+struct rds_iovec {
+        u_int64_t       addr;
+        u_int64_t       bytes;
+};
+
+struct rds_get_mr_args {
+        struct rds_iovec vec;
+        u_int64_t       cookie_addr;
+        uint64_t        flags;
+};
+.fi
+.IP
+The
+.B cookie_addr
+specifies a memory location where to store the RDMA cookie.
+.IP
+The
+.B flags
+value is a bitwise OR of any of the following flags:
+.RS
+.TP
+.B RDS_RDMA_USE_ONCE
+This tells the kernel that the allocated RDMA cookie is to be used
+exactly once. When the RDMA ACK message arrives, the kernel will
+automatically unbind the memory area and release any resources
+associated with the cookie.
+.IP
+If this flag is not set, it is the application's responsibility to
+release the memory region at a later time using the
+.BR RDS_FREE_MR
+socket option.
+.TP
+.B RDS_RDMA_INVALIDATE
+Normally, RDMA memory mappings are invalidated lazily, as this
+requires some relatively costly synchronization with the HCA. However,
+this means that the server application can continue to access the
+registered memory for some indeterminate amount of time.
+If this flag is set, the RDS code will invalidate
+the mapping at the time it is released (either upon arrival of the
+RDMA ACK, if
+.B USE_ONCE
+was specified; or when the application destroys it using
+.BR FREE_MR ).
+.RE
+.TP
+.B  RDMA Operation
+RDMA operations are initiated by the server using the
+.BR RDS_CMSG_RDMA_ARGS
+control message, which takes the following data as payload:
+.IP
+.nf
+struct rds_rdma_args {
+        rds_rdma_cookie_t cookie;
+        struct rds_iovec remote_vec;
+        u_int64_t       local_vec_addr;
+        u_int64_t       nr_local;
+        u_int64_t       flags;
+        u_int32_t       user_token;
+};
+.fi
+.IP
+The
+.B cookie
+argument contains the RDMA cookie received from the client.
+The local memory is given via an array of
+.BR rds_iovec s.
+The array address is given in
+.BR local_vec_addr ,
+and its number of elements is given in
+.BR nr_local .
+.IP
+The struct member
+.B remote_vec
+specifies a location relative to the memory area identified
+by the cookie:
+.BR remote_vec . addr
+is an offset into that region, and
+.BR remote_vec . bytes
+is the length of the memory window to copy to/from.
+This length must match the size of the local memory area,
+i.e. the sum of bytes in all members of the local iovec.
+.IP
+The flags field contains the bitwise OR of any of the following
+flags:
+.RS
+.TP
+.B RDS_RDMA_READWRITE
+If set, any RDMA WRITE is initiated from the server's memory
+to the client's. If not set, RDS will do a RDMA READ from the
+client's memory to the server's memory.
+.TP
+.B RDS_RDMA_FENCE
+By default, Infiniband makes no guarantee about the ordering of
+an RDMA READ with respect to subsequent SEND operations. Setting
+this flag asks that the RDMA READ should be fenced off the subsequent
+RDS ACK message. Setting this flag requires an additional round-trip
+of the IB fabric, but it is a good idea to use set this flag
+by default, unless you are really sure you do not want it.
+.TP
+.B RDS_RDMA_NOTIFY_ME
+This flag requests a notification upon completion of the RDMA
+operation (successful or otherwise). The noticiation will contain
+the value of the
+.B user_token
+field passed in by the application. This allows the application to
+release resources (such as buffers) assosicated with the RDMA transfer.
+.RE
+.IP
+The
+.B user_token
+can be used to pass an application specific identifier to the
+kernel. This token is returned to the application when a status
+notification is generated (see the following section).
+.TP
+.B RDMA Notification
+The RDS kernel code is able to notify the server application when
+an RDMA operation completes. These notifications are delivered
+via
+.B RDS_CMSG_RDMA_STATUS
+control messages.
+.IP
+By default, no notifications are generated. There are two ways an
+application can request them. On one hand, status notifications can
+be enabled on a per-operation basis by setting the
+.B RDS_RDMA_NOTIFY_ME
+flag in the RDMA arguments. On the other hand, the application can
+request notifications for all RDMA operations that fail by setting
+the
+.B RDS_RECVERR
+socket option (see below).
+In both cases, the format of the notification is the same; and at
+most one notification will be sent per completed operation.
+.IP
+The message format is this:
+.IP
+.nf
+struct rds_rdma_notify {
+        u_int32_t       user_token;
+        int32_t         status;
+};
+.fi
+.IP
+The
+.B user_token
+field contains the value previously given to the kernel in the
+.BR RDS_CMSG_RDMA_ARGS
+control message. The
+.BR status
+field contains a status value, with 0 indicating success, and
+non-zero indicating an error.
+.IP
+The following status codes are currently defined:
+.RS
+.TP
+.B RDS_RDMA_SUCCESS
+The RDMA operation succeeded.
+.TP
+.B RDS_RDMA_REMOTE_ERROR
+The RDMA operation failed due to a remote access error. This is
+usually due to an invalid R_key, offset or transfer size.
+.TP
+.B RDS_RDMA_CANCELED
+The RDMA operation was canceled by the application.
+(This error code is not yet generated).
+.TP
+.B RDS_RDMA_DROPPED
+RDMA operations were discarded after the connection broke and
+was re-established. The RDMA operation may have been processed
+partially.
+.TP
+.B RDS_RDMA_OTHER_ERROR
+Any other failure.
+.RE
+.TP
+.B RDMA setsockopt arguments
+When using the
+.B RDS_GET_MR
+socket option to register a memory range, the application passes
+a pointer to a
+.B struct rds_get_mr_args
+variable, described above.
+.IP
+The
+.B RDS_FREE_MR
+call takes an argument of type
+.BR "struct rds_free_mr_args" :
+.IP
+.nf
+struct rds_free_mr_args {
+        rds_rdma_cookie_t cookie;
+        u_int64_t       flags;
+};
+.fi
+.IP
+.B cookie
+specifies the RDMA cookie to be released. RDMA access to the memory
+range will usually not be invoked instantly, because the operation is
+rather costly. However, if the
+.B flags
+argument contains
+.BR RDS_RDMA_INVALIDATE ,
+RDS will invalidate the indicated mapping immediately,
+as described in section
+.B "Mapping arguments"
+above.
+.IP
+If the
+.B cookie
+argument is 0, and
+.BR RDS_RDMA_INVALIDATE
+is set, RDS will invalidate old memory mappings on all devices.
+.\"-------------------------------
+.SH ERRORS
+In addition to the usual error codes returned by
+.BR sendmsg ", " recvmsg " and " setsockopt ,
+RDS returns the following error codes:
+.TP
+.BR EAGAIN
+RDS was unable to map a memory range because the limit was
+exceeded (returned by
+.BR RDS_CMSG_RDMA_MAP " and " RDS_GET_MR ).
+.TP
+.BR EINVAL
+When sending a message, there were were conflicting control messages
+(e.g. two
+.B RDMA_MAP
+messages, or a
+.B RDMA_MAP " and a " RDMA_DEST
+message).
+.IP
+In a
+.BR RDS_CMSG_RDMA_MAP " or " RDS_GET_MR
+operation, the application specified memory range greater than the
+maximum size supported.
+.IP
+When setting up an RDMA operation with
+.BR RDS_CMSG_RDMA_ARGS ,
+the size of the local memory (given in the
+.BR rds_iovec )
+did not match the size of the remote memory range.
+.TP
+.B EBUSY
+RDS was unable to obtain a DMA mapping for the indicated memory.
+.\"-------------------------------
+.SH LIMITS
+Currently, the following limits apply
+.IP \(bu
+The maximum size of a zerocopy transfer is 1MB. This can be
+adjusted via the
+.B fmr_message_size
+module parameter.
+.IP \(bu
+The maximum number of memory ranges that can be mapped is
+limited to 2048 at the moment. This can be adjusted via the
+.B fmr_pool_size
+module parameter. However, the actual limit imposed by the
+hardware may in fact be lower.
+.SH AUTHORS
+RDS was written and is Copyright (C) 2007-2008 by Oracle, Inc.

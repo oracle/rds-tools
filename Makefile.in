@@ -33,6 +33,7 @@ install: $(PROGRAMS)
 	install -m 555 -s $(PROGRAMS) $(bindir)
 	install -d $(mandir)/man1
 	install -m 644 *.1 $(mandir)/man1
+	install -m 644 *.7 $(mandir)/man7
 	install -d $(incdir)/net
 	install -m 444 net/rds.h $(incdir)/net
 

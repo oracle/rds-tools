@@ -723,11 +723,10 @@ static void rdma_validate(const struct header *in_hdr, struct options *opts)
 		die("Unexpected RDMA op %u in request\n", in_hdr->rdma_op);
 
 
-	trace("RDS received request to issue rdma %s len %lu rva %Lx rpa %Lx key %Lx pattern %Lx\n",
+	trace("RDS received request to issue rdma %s len %lu rva %Lx key %Lx pattern %Lx\n",
 		in_hdr->rdma_op == RDMA_OP_WRITE? "write to" : "read from",
 		rdma_size,
 		(unsigned long long) in_hdr->rdma_addr,
-		(unsigned long long) in_hdr->rdma_phyaddr,
 		(unsigned long long) in_hdr->rdma_key,
 		(unsigned long long) in_hdr->rdma_pattern);
 }
@@ -775,6 +774,8 @@ static void rdma_mark_completed(struct task *tasks, unsigned int token, int stat
 {
 	struct task *t;
 	unsigned int i;
+
+	trace("RDS rdma completion for token %x\n", token);
 
 	t = &tasks[token / opt.req_depth];
 	i = token % opt.req_depth;
@@ -900,9 +901,9 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 
 	rdma_size = hdr->rdma_size;	/* ntohl? */
 
-	trace("RDS issuing rdma for key %Lx rva %Lx len %u local_buf %p\n",
+	trace("RDS issuing rdma for token %x key %Lx len %u local_buf %p\n",
+			user_token,
 			(unsigned long long) hdr->rdma_key,
-			(unsigned long long) hdr->rdma_phyaddr,
 			rdma_size, local_buf);
 
 	/* rdma args */
@@ -969,12 +970,11 @@ static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size
 static void rdma_process_ack(int fd, struct header *hdr,
 		struct child_control *ctl)
 {
-	trace("RDS rcvd rdma %s completion for request key %Lx len %u local addr %Lx phyaddr %Lx\n",
+	trace("RDS rcvd rdma %s ACK for request key %Lx len %u local addr %Lx\n",
 		  RDMA_OP_WRITE == hdr->rdma_op ? "write" : "read",
 		  (unsigned long long) hdr->rdma_key,
 		  hdr->rdma_size,	/* XXX ntohl? */
-		  (unsigned long long) hdr->rdma_addr,
-		  (unsigned long long) hdr->rdma_phyaddr);
+		  (unsigned long long) hdr->rdma_addr);
 
 	/* Need to free the MR unless allocated with use_once */
 	if (!opt.rdma_use_once)

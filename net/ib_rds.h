@@ -71,10 +71,13 @@
  *	R_Key along in an RDS extension header.
  *	The cmsg_data is a struct rds_get_mr_args,
  *	the same as for the GET_MR setsockopt.
+ * RDS_CMSG_RDMA_STATUS (recvmsg)
+ *	Returns the status of a completed RDMA operation.
  */
-#define RDS_CMSG_RDMA_ARGS	1
-#define RDS_CMSG_RDMA_DEST	2
-#define RDS_CMSG_RDMA_MAP	3
+#define RDS_CMSG_RDMA_ARGS		1
+#define RDS_CMSG_RDMA_DEST		2
+#define RDS_CMSG_RDMA_MAP		3
+#define RDS_CMSG_RDMA_STATUS		4
 
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001
@@ -189,7 +192,19 @@ struct rds_rdma_args {
 	u_int64_t	nr_local;
 	u_int64_t	flags;
 	u_int64_t	rdma_id_addr;
+	u_int32_t	user_token;
 };
+
+struct rds_rdma_notify {
+	u_int32_t	user_token;
+	int32_t		status;
+};
+
+#define RDS_RDMA_SUCCESS	0
+#define RDS_RDMA_REMOTE_ERROR	1
+#define RDS_RDMA_CANCELED	2
+#define RDS_RDMA_DROPPED	3
+#define RDS_RDMA_OTHER_ERROR	4
 
 /*
  * Common set of flags for all RDMA related structs
@@ -199,5 +214,6 @@ struct rds_rdma_args {
 #define RDS_RDMA_INVALIDATE	0x0004	/* invalidate R_Key after freeing MR */
 #define RDS_RDMA_USE_ONCE	0x0008	/* free MR after use */
 #define RDS_RDMA_DONTWAIT	0x0010	/* Don't wait in SET_BARRIER */
+#define RDS_RDMA_NOTIFY_ME	0x0020	/* Notify when operation completes */
 
 #endif /* IB_RDS_H */

@@ -56,6 +56,7 @@ struct options {
 	uint8_t		verify;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
+	uint8_t		rdma_use_notify;
 	unsigned int	rdma_alignment;
 
 	/* At 1024 tasks, printing warnings about
@@ -618,10 +619,12 @@ static void rds_compare_buffer(uint64_t *addr, int size, uint64_t pattern)
 }
 
 struct task {
+	unsigned int		nr;
 	unsigned int		pending;
 	unsigned int		unacked;
 	struct sockaddr_in	src_addr;	/* same for all tasks */
 	struct sockaddr_in	dst_addr;
+	unsigned char		drain_rdmas;
 	uint32_t		send_seq;
 	uint32_t		recv_seq;
 	uint16_t		send_index;
@@ -634,6 +637,7 @@ struct task {
 	uint64_t **		rdma_buf;
 	uint64_t *		rdma_req_key;
 	uint64_t *		rdma_id;
+	uint8_t *		rdma_inflight;
 	uint32_t		buffid;
 	uint8_t			rdma_next_op;
 };
@@ -663,6 +667,7 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 
 			t->rdma_req_key[j] = 0;
 			t->rdma_id[j] = 0;
+			t->rdma_inflight[j] = 0;
 		}
 	}
 }
@@ -761,6 +766,46 @@ static int rdma_drain(int fd, struct task *t, uint64_t *wait_id)
 	return 0;
 }
 
+static inline unsigned int rdma_user_token(struct task *t, unsigned int qindex)
+{
+	return t->nr * opt.req_depth + qindex;
+}
+
+static void rdma_mark_completed(struct task *tasks, unsigned int token, int status)
+{
+	struct task *t;
+	unsigned int i;
+
+	t = &tasks[token / opt.req_depth];
+	i = token % opt.req_depth;
+
+	if (status) {
+		const char *errmsg;
+
+		switch (status) {
+		case RDS_RDMA_REMOTE_ERROR:
+			errmsg = "remote error"; break;
+		case RDS_RDMA_CANCELED:
+			errmsg = "operation was cancelled"; break;
+		case RDS_RDMA_DROPPED:
+			errmsg = "operation was dropped"; break;
+		case RDS_RDMA_OTHER_ERROR:
+			errmsg = "other error"; break;
+		default:
+			errmsg = "unknown error"; break;
+		}
+
+		printf("%s:%u: RDMA op %u failed: %s\n",
+				inet_ntoa(t->dst_addr.sin_addr),
+				ntohs(t->dst_addr.sin_port),
+				i, errmsg);
+	}
+
+	t->rdma_inflight[i] = 0;
+	t->rdma_id[i] = 0;
+	t->drain_rdmas = 0;
+}
+
 /*
  * Check for completed RDMA operations without blocking.
  * Updates the rdma_id vectors of all tasks.
@@ -797,8 +842,10 @@ static int rdma_complete(int fd, struct task *tasks,
 		wait_id = 0xffffffffffffffffULL;
 		for (i = 0; i < opts->nr_tasks; ++i, ++t) {
 			for (j = 0; j < opts->req_depth; ++j) {
-				if (rds_rdma_id_cmp(t->rdma_id[j], <=, done_id))
+				if (rds_rdma_id_cmp(t->rdma_id[j], <=, done_id)) {
+					t->rdma_inflight[j] = 0;
 					t->rdma_id[j] = 0;
+				}
 				else
 				if (rds_rdma_id_cmp(t->rdma_id[j], <, wait_id))
 					wait_id = t->rdma_id[j];
@@ -844,6 +891,7 @@ static void rdma_put_cmsg(struct msghdr *msg, int type,
  * the ACK packet.
  */
 static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
+		unsigned int user_token,
 		void *local_buf, uint64_t *rdma_id_p)
 {
 	static struct rds_iovec iov;
@@ -892,6 +940,10 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 
 	/* Always fence off subsequent SENDs */
 	args.flags |= RDS_RDMA_FENCE;
+	if (opt.rdma_use_notify) {
+		args.flags |= RDS_RDMA_NOTIFY_ME;
+		args.user_token = user_token;
+	}
 
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_ARGS, &args, sizeof(args));
 }
@@ -970,7 +1022,7 @@ static void build_header(struct task *t, struct header *hdr,
 static int send_packet(int fd, struct task *t,
 		struct header *hdr, unsigned int size)
 {
-	unsigned char buf[size];
+	unsigned char buf[size], *rdma_flight_recorder = NULL;
 	struct msghdr msg;
 	struct iovec iov;
 	uint64_t *rdma_id_p = NULL;
@@ -1012,13 +1064,25 @@ static int send_packet(int fd, struct task *t,
 	if (hdr->op == OP_ACK && hdr->rdma_op != 0) {
 		unsigned int qindex = ntohs(hdr->index);
 
-		if (t->rdma_id[qindex] != 0) {
-			errno = ENOBUFS;
+		if (t->rdma_inflight[qindex] != 0) {
+			/* It is unlikely but (provably) possible for
+			 * new requests to arrive before the RDMA notification.
+			 * That's because RDMA notifications are triggered
+			 * by the RDS ACK processing, which happens after new
+			 * messages were queued on the socket.
+			 *
+			 * We return one of the more obscure error messages,
+			 * which we recognize and handle in the top loop. */
+			trace("Drain RDMA 0x%x\n", rdma_user_token(t, qindex));
+			errno = EBADSLT;
 			return -1;
 		}
 		rdma_id_p = &t->rdma_id[qindex];
 		rdma_drain(fd, t, rdma_id_p);
-		rdma_build_cmsg_xfer(&msg, hdr, t->local_buf[qindex], rdma_id_p);
+		rdma_build_cmsg_xfer(&msg, hdr,
+				rdma_user_token(t, qindex),
+				t->local_buf[qindex], rdma_id_p);
+		rdma_flight_recorder = &t->rdma_inflight[qindex];
 	}
 
 	ret = sendmsg(fd, &msg, 0);
@@ -1034,6 +1098,8 @@ static int send_packet(int fd, struct task *t,
 		trace("RDS rdma operation ID %Lx\n",
 			(unsigned long long) *rdma_id_p);
 
+	if (rdma_flight_recorder)
+		*rdma_flight_recorder = 1;
 	t->send_seq++;
 	return ret;
 }
@@ -1141,7 +1207,8 @@ static int recv_message(int fd,
 		void *buffer, size_t size,
 		rds_rdma_cookie_t *cookie,
 		struct sockaddr_in *sin,
-		struct timeval *tstamp)
+		struct timeval *tstamp,
+		struct task *tasks)
 {
 	struct cmsghdr *cmsg;
 	char cmsgbuf[256];
@@ -1164,7 +1231,7 @@ static int recv_message(int fd,
 
 	if (ret < 0)
 		return ret;
-	if (ret < sizeof(struct header))
+	if (ret && ret < sizeof(struct header))
 		die("recvmsg() returned short data: %zd", ret);
 	if (msg.msg_namelen < sizeof(struct sockaddr_in))
 		die("socklen = %d < sizeof(sin) (%zu)\n",
@@ -1172,11 +1239,23 @@ static int recv_message(int fd,
 
 	/* See if the message comes with a RDMA destination */
 	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-		if (cmsg->cmsg_level == SOL_RDS
-		 && cmsg->cmsg_type == RDS_CMSG_RDMA_DEST) {
+		struct rds_rdma_notify notify;
+
+		if (cmsg->cmsg_level != SOL_RDS)
+			continue;
+		switch (cmsg->cmsg_type) {
+		case RDS_CMSG_RDMA_DEST:
 			if (cmsg->cmsg_len < CMSG_LEN(sizeof(*cookie)))
 				die("RDS_CMSG_RDMA_DEST data too small");
 			memcpy(cookie, CMSG_DATA(cmsg), sizeof(*cookie));
+			break;
+
+		case RDS_CMSG_RDMA_STATUS:
+			if (cmsg->cmsg_len < CMSG_LEN(sizeof(notify)))
+				die("RDS_CMSG_RDMA_DEST data too small");
+			memcpy(&notify, CMSG_DATA(cmsg), sizeof(notify));
+			rdma_mark_completed(tasks, notify.user_token, notify.status);
+			break;
 		}
 	}
 	return ret;
@@ -1196,9 +1275,13 @@ static int recv_one(int fd, struct task *tasks,
 	int task_index;
 	ssize_t ret;
 
-	ret = recv_message(fd, buf, sizeof(buf), &rdma_dest, &sin, &tstamp);
+	ret = recv_message(fd, buf, sizeof(buf), &rdma_dest, &sin, &tstamp, tasks);
 	if (ret < 0)
 		return ret;
+
+	/* If we received only RDMA completions, ret will be 0 */
+	if (ret == 0)
+		return 0;
 
 	/* check the incoming sequence number */
 	task_index = ntohs(sin.sin_port) - opts->starting_port - 1;
@@ -1299,6 +1382,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 	memset(tasks, 0, sizeof(tasks));
 	for (i = 0; i < opts->nr_tasks; i++) {
+		tasks[i].nr = i;
 		tasks[i].src_addr = sin;
 		tasks[i].dst_addr.sin_family = AF_INET;
 		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
@@ -1306,6 +1390,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
 		tasks[i].rdma_req_key = alloca(opts->req_depth * sizeof(uint64_t));
 		tasks[i].rdma_id = alloca(opts->req_depth * sizeof(uint64_t));
+		tasks[i].rdma_inflight = alloca(opts->req_depth * sizeof(uint8_t));
 		tasks[i].rdma_buf = alloca(opts->req_depth * sizeof(uint64_t *));
 		tasks[i].local_buf = alloca(opts->req_depth * sizeof(uint64_t *));
 		tasks[i].ack_header = alloca(opts->req_depth * sizeof(struct header));
@@ -1354,12 +1439,16 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		}
 
 		/* Check for completed RDMA transfers */
-		if (opts->rdma_size && !rdma_complete(fd, tasks, opts, ctl))
+		if (opts->rdma_size
+		 && !opts->rdma_use_notify
+		 && !rdma_complete(fd, tasks, opts, ctl))
 			check_rdma = 1;
 
 		/* keep the pipeline full */
 		can_send = !!(pfd.revents & POLLOUT);
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
+			if (t->drain_rdmas)
+				continue;
 			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
 				pfd.events |= POLLOUT;
 
@@ -1373,6 +1462,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				 * It would be nice if we could map the congestion
 				 * map into user space :-)
 				 */
+				if (errno == EBADSLT)
+					t->drain_rdmas = 1;
+				else
 				if (errno != ENOBUFS)
 					break;
 				continue;
@@ -1892,6 +1984,7 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 enum {
 	OPT_RDMA_USE_ONCE = 0x100,
 	OPT_RDMA_USE_GET_MR,
+	OPT_RDMA_USE_NOTIFY,
 	OPT_RDMA_ALIGNMENT,
 };
 
@@ -1913,6 +2006,7 @@ static struct option long_options[] = {
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
+{ "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 
 { NULL }
@@ -1953,6 +2047,7 @@ int main(int argc, char **argv)
 	opts.rdma_size = 0;
 	opts.rdma_use_once = 1;
 	opts.rdma_use_get_mr = 0;
+	opts.rdma_use_notify = 0;
 	opts.rdma_alignment = 0;
 
         while(1) {
@@ -2013,6 +2108,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_USE_GET_MR:
 				opts.rdma_use_get_mr = parse_ull(optarg, 1);
+				break;
+			case OPT_RDMA_USE_NOTIFY:
+				opts.rdma_use_notify = parse_ull(optarg, 1);
 				break;
 			case OPT_RDMA_ALIGNMENT:
 				opts.rdma_alignment = parse_ull(optarg, sys_page_size);

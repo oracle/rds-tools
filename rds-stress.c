@@ -54,6 +54,7 @@ struct options {
 	uint8_t		rtprio;
 	uint8_t		tracing;
 	uint8_t		verify;
+	uint8_t		show_params;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
 	uint8_t		rdma_use_notify;
@@ -1794,6 +1795,36 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	int fd;
 	uint8_t ok;
 
+	if (opts->show_params) {
+		unsigned int k;
+
+		printf("Options:\n"
+		       "  %-10s %-7u\n"
+		       "  %-10s %-7u\n"
+		       "  %-10s %-7u\n"
+		       "  %-10s %-7u\n",
+		       "Tasks", opts->nr_tasks,
+		       "Req size", opts->req_size,
+		       "ACK size", opts->ack_size,
+		       "RDMA size", opts->rdma_size);
+
+		k = 0;
+		printf("  %-10s", "RDMA opts");
+		if (opts->rdma_use_once) {
+			printf(" use_once"); ++k;
+		}
+		if (opts->rdma_use_get_mr) {
+			printf(" use_get_mr"); ++k;
+		}
+		if (opts->rdma_alignment) {
+			printf(" align=%u", opts->rdma_alignment); ++k;
+		}
+		if (!k)
+			printf(" (defaults)");
+		printf("\n");
+		printf("\n");
+	}
+
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
@@ -1986,6 +2017,7 @@ enum {
 	OPT_RDMA_USE_GET_MR,
 	OPT_RDMA_USE_NOTIFY,
 	OPT_RDMA_ALIGNMENT,
+	OPT_SHOW_PARAMS,
 };
 
 static struct option long_options[] = {
@@ -2008,6 +2040,7 @@ static struct option long_options[] = {
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
+{ "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
 
 { NULL }
 };
@@ -2049,6 +2082,7 @@ int main(int argc, char **argv)
 	opts.rdma_use_get_mr = 0;
 	opts.rdma_use_notify = 0;
 	opts.rdma_alignment = 0;
+	opts.show_params = 0;
 
         while(1) {
 		int c, index;
@@ -2114,6 +2148,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_ALIGNMENT:
 				opts.rdma_alignment = parse_ull(optarg, sys_page_size);
+				break;
+			case OPT_SHOW_PARAMS:
+				opts.show_params = 1;
 				break;
                         case 'h':
                         case '?':

@@ -963,7 +963,9 @@ static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size
 	args.vec.addr = addr;
 	args.vec.bytes = size;
 	args.cookie_addr = ptr64(&cookie);
-	args.flags = RDS_RDMA_USE_ONCE | RDS_RDMA_READWRITE; /* for now, always assume r/w */
+	args.flags = RDS_RDMA_READWRITE; /* for now, always assume r/w */
+	if (opt.rdma_use_once)
+		args.flags |= RDS_RDMA_USE_ONCE;
 
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_MAP, &args, sizeof(args));
 }

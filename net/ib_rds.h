@@ -53,7 +53,8 @@
 #define RDS_CANCEL_SENT_TO      	1
 #define RDS_GET_MR			2
 #define RDS_FREE_MR			3
-#define RDS_BARRIER			4
+/* deprecated: RDS_BARRIER 4 */
+#define RDS_RECVERR			5
 
 /*
  * Control message types for SOL_RDS.
@@ -173,13 +174,6 @@ struct rds_get_mr_args {
 	uint64_t	flags;
 };
 
-struct rds_barrier_args {
-	__be32		daddr;
-	u_int64_t	flags;
-	u_int64_t	rdma_id_addr;
-	u_int64_t	wait_rdma_id;
-};
-
 struct rds_free_mr_args {
 	rds_rdma_cookie_t cookie;
 	u_int64_t	flags;
@@ -191,7 +185,6 @@ struct rds_rdma_args {
 	u_int64_t	local_vec_addr;
 	u_int64_t	nr_local;
 	u_int64_t	flags;
-	u_int64_t	rdma_id_addr;
 	u_int32_t	user_token;
 };
 

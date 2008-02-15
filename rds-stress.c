@@ -59,6 +59,7 @@ struct options {
 	uint8_t		rdma_use_get_mr;
 	uint8_t		rdma_use_notify;
 	unsigned int	rdma_alignment;
+	unsigned int	connect_retries;
 
 	/* At 1024 tasks, printing warnings about
 	 * setsockopt(SNDBUF) allocation is rather
@@ -1764,6 +1765,39 @@ static void release_children_and_wait(struct options *opts,
 	}
 }
 
+static void peer_connect(int fd, const struct sockaddr_in *sin)
+{
+	int retries = 0;
+
+	printf("connecting to %s:%u",
+			inet_ntoa(sin->sin_addr),
+			ntohs(sin->sin_port));
+	fflush(stdout);
+
+	while (connect(fd, (struct sockaddr *) sin, sizeof(*sin))) {
+		if (retries == 0)
+			printf(": %s", strerror(errno));
+
+		switch (errno) {
+		case ECONNREFUSED:
+		case EHOSTUNREACH:
+		case ENETUNREACH:
+			if (retries >= opt.connect_retries)
+				break;
+			if (retries++ == 0)
+				printf(" - retrying");
+			printf(".");
+			fflush(stdout);
+			sleep(1);
+			continue;
+		}
+
+		printf("\n");
+		die("connect(%s) failed", inet_ntoa(sin->sin_addr));
+	}
+	printf("\n");
+}
+
 static void peer_send(int fd, const void *ptr, size_t size)
 {
 	ssize_t ret;
@@ -1837,14 +1871,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	sin.sin_port = htons(opts->starting_port);
 	sin.sin_addr.s_addr = htonl(opts->send_addr);
 
-	printf("connecting to %s:%u\n", inet_ntoa(sin.sin_addr),
-		ntohs(sin.sin_port));
-
-	if (connect(fd, (struct sockaddr *)&sin, sizeof(sin)))
-		die_errno("connect() failed");
-
-	printf("connected to %s:%u\n", inet_ntoa(sin.sin_addr),
-		ntohs(sin.sin_port));
+	peer_connect(fd, &sin);
 
 	/* "negotiation" is overstating things a bit :-)
 	 * We just tell the peer what options to use.
@@ -2020,6 +2047,7 @@ enum {
 	OPT_RDMA_USE_NOTIFY,
 	OPT_RDMA_ALIGNMENT,
 	OPT_SHOW_PARAMS,
+	OPT_CONNECT_RETRIES,
 };
 
 static struct option long_options[] = {
@@ -2043,6 +2071,7 @@ static struct option long_options[] = {
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 { "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
+{ "connect-retries",	required_argument,	NULL,	OPT_CONNECT_RETRIES },
 
 { NULL }
 };
@@ -2085,6 +2114,7 @@ int main(int argc, char **argv)
 	opts.rdma_use_notify = 0;
 	opts.rdma_alignment = 0;
 	opts.show_params = 0;
+	opts.connect_retries = 0;
 
         while(1) {
 		int c, index;
@@ -2153,6 +2183,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_SHOW_PARAMS:
 				opts.show_params = 1;
+				break;
+			case OPT_CONNECT_RETRIES:
+				opts.connect_retries = parse_ull(optarg, (uint32_t)~0);
 				break;
                         case 'h':
                         case '?':

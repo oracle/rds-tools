@@ -55,6 +55,7 @@ struct options {
 	uint8_t		tracing;
 	uint8_t		verify;
 	uint8_t		show_params;
+	uint8_t		use_cong_monitor;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
 	unsigned int	rdma_alignment;
@@ -470,6 +471,15 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 			"getsockopt(RCVBUF) returned %d, we need %d * 2\n",
 			val, bytes);
 
+	val = 1;
+	if (opts->use_cong_monitor
+	 && setsockopt(fd, SOL_RDS, RDS_CONG_MONITOR, &val, sizeof(val))) {
+		if (errno != ENOPROTOOPT)
+			die_errno("setsockopt(RDS_CONG_MONITOR) failed");
+		printf("Kernel does not support congestion monitoring; disabled\n");
+		opts->use_cong_monitor = 0;
+	}
+
 	fcntl(fd, F_SETFL, O_NONBLOCK);
 
 	return fd;
@@ -601,6 +611,7 @@ struct task {
 	unsigned int		unacked;
 	struct sockaddr_in	src_addr;	/* same for all tasks */
 	struct sockaddr_in	dst_addr;
+	unsigned char		congested;
 	unsigned char		drain_rdmas;
 	uint32_t		send_seq;
 	uint32_t		recv_seq;
@@ -1126,6 +1137,21 @@ static int recv_message(int fd,
 		if (cmsg->cmsg_level != SOL_RDS)
 			continue;
 		switch (cmsg->cmsg_type) {
+		case RDS_CMSG_CONG_UPDATE:
+			if (cmsg->cmsg_len < CMSG_LEN(sizeof(uint64_t)))
+				die("RDS_CMSG_CONG_UPDATE data too small");
+			else {
+				unsigned int i, port;
+				uint64_t mask;
+
+				memcpy(&mask, CMSG_DATA(cmsg), sizeof(mask));
+				for (i = 0; i < opt.nr_tasks; ++i) {
+					port = ntohs(tasks[i].dst_addr.sin_port);
+					if (mask & RDS_CONG_MONITOR_MASK(port))
+						tasks[i].congested = 0;
+				}
+			}
+			break;
 		case RDS_CMSG_RDMA_DEST:
 			if (cmsg->cmsg_len < CMSG_LEN(sizeof(*cookie)))
 				die("RDS_CMSG_RDMA_DEST data too small");
@@ -1161,7 +1187,8 @@ static int recv_one(int fd, struct task *tasks,
 	if (ret < 0)
 		return ret;
 
-	/* If we received only RDMA completions, ret will be 0 */
+	/* If we received only RDMA completions or cong updates,
+	 * ret will be 0 */
 	if (ret == 0)
 		return 0;
 
@@ -1322,6 +1349,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		/* keep the pipeline full */
 		can_send = !!(pfd.revents & POLLOUT);
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
+			if (opt.use_cong_monitor && t->congested)
+				continue;
 			if (t->drain_rdmas)
 				continue;
 			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
@@ -1337,12 +1366,12 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				 * It would be nice if we could map the congestion
 				 * map into user space :-)
 				 */
-				if (errno == EBADSLT)
+				if (errno == ENOBUFS)
+					t->congested = 1;
+				else if (errno == EBADSLT)
 					t->drain_rdmas = 1;
 				else
-				if (errno != ENOBUFS)
 					break;
-				continue;
 			}
 		}
 	}
@@ -1913,6 +1942,7 @@ enum {
 	OPT_RDMA_ALIGNMENT,
 	OPT_SHOW_PARAMS,
 	OPT_CONNECT_RETRIES,
+	OPT_USE_CONG_MONITOR,
 };
 
 static struct option long_options[] = {
@@ -1937,6 +1967,7 @@ static struct option long_options[] = {
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 { "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
 { "connect-retries",	required_argument,	NULL,	OPT_CONNECT_RETRIES },
+{ "use-cong-monitor",	required_argument,	NULL,	OPT_USE_CONG_MONITOR },
 
 { NULL }
 };
@@ -1974,6 +2005,7 @@ int main(int argc, char **argv)
 	opts.tracing = 0;
 	opts.verify = 0;
 	opts.rdma_size = 0;
+	opts.use_cong_monitor = 1;
 	opts.rdma_use_once = 1;
 	opts.rdma_use_get_mr = 0;
 	opts.rdma_alignment = 0;
@@ -2032,6 +2064,9 @@ int main(int argc, char **argv)
 				break;
 			case 'V':
 				opts.tracing = 1;
+				break;
+			case OPT_USE_CONG_MONITOR:
+				opts.use_cong_monitor = parse_ull(optarg, 1);
 				break;
 			case OPT_RDMA_USE_ONCE:
 				opts.rdma_use_once = parse_ull(optarg, 1);

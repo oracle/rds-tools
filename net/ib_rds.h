@@ -55,6 +55,7 @@
 #define RDS_FREE_MR			3
 /* deprecated: RDS_BARRIER 4 */
 #define RDS_RECVERR			5
+#define RDS_CONG_MONITOR		6
 
 /*
  * Control message types for SOL_RDS.
@@ -79,6 +80,7 @@
 #define RDS_CMSG_RDMA_DEST		2
 #define RDS_CMSG_RDMA_MAP		3
 #define RDS_CMSG_RDMA_STATUS		4
+#define RDS_CMSG_CONG_UPDATE		5
 
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001
@@ -149,6 +151,32 @@ struct rds_info_tcp_socket {
 	u_int32_t	last_seen_una;
 } __attribute__((packed));
 
+/*
+ * Congestion monitoring.
+ * Congestion control in RDS happens at the host connection
+ * level by exchanging a bitmap marking congested ports.
+ * By default, a process sleeping in poll() is always woken
+ * up when the congestion map is updated.
+ * With explicit monitoring, an application can have more
+ * fine-grained control.
+ * The application installs a 64bit mask value in the socket,
+ * where each bit corresponds to a group of ports.
+ * When a congestion update arrives, RDS checks the set of
+ * ports that are now uncongested against the list bit mask
+ * installed in the socket, and if they overlap, we queue a
+ * cong_notification on the socket.
+ *
+ * To install the congestion monitor bitmask, use RDS_CONG_MONITOR
+ * with the 64bit mask.
+ * Congestion updates are received via RDS_CMSG_CONG_UPDATE
+ * control messages.
+ *
+ * The correspondence between bits and ports is
+ *	1 << (portnum % 64)
+ */
+#define RDS_CONG_MONITOR_SIZE	64
+#define RDS_CONG_MONITOR_BIT(port)  (((unsigned int) port) % RDS_CONG_MONITOR_SIZE)
+#define RDS_CONG_MONITOR_MASK(port) (1 << RDS_CONG_MONITOR_BIT(port))
 
 /*
  * RDMA related types

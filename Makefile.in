@@ -32,6 +32,7 @@ install: $(PROGRAMS)
 	install -d $(bindir)
 	install -m 555 -s $(PROGRAMS) $(bindir)
 	install -d $(mandir)/man1
+	install -d $(mandir)/man7
 	install -m 644 *.1 $(mandir)/man1
 	install -m 644 *.7 $(mandir)/man7
 	install -d $(incdir)/net
@@ -64,6 +65,7 @@ EXTRA_DIST := 	rds-info.1 \
 		rds-gen.1 \
 		rds-sink.1 \
 		rds-stress.1 \
+		rds-rdma.7 \
 		Makefile.in \
 		rds-tools.spec.in \
 		configure.in \

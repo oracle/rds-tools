@@ -65,6 +65,7 @@ EXTRA_DIST := 	rds-info.1 \
 		rds-gen.1 \
 		rds-sink.1 \
 		rds-stress.1 \
+		rds.7 \
 		rds-rdma.7 \
 		Makefile.in \
 		rds-tools.spec.in \

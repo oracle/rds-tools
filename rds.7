@@ -1,0 +1,445 @@
+.TH RDS 7
+.SH NAME
+RDS \- Reliable Datagram Sockets
+.SH
+SYNOPSIS
+.nf
+.B #include <sys/socket.h>
+.B #include <netinet/in.h>
+.fi
+.SH DESCRIPTION
+This is an implementation of the RDS socket API. It provides reliable,
+in-order datagram delivery between sockets over a variety of transports.
+.PP
+Currently, RDS can be transported over Infiniband, and loopback.
+RDS over TCP is disabled, but will be re-enabled in the near future.
+.PP
+RDS uses standard
+.B AF_INET
+addresses as described in
+.BR ip (7)
+to identify end points.
+.\"------------------------------------------------------------------
+.SS Socket Creation
+RDS is still in development and as such does not have a reserved protocol
+family constant. Applications must read the string representation of the
+protocol family value from the
+.B pf_rds
+sysctl parameter file described below.
+.PP
+.nf
+.B rds_socket = socket(pf_rds, SOCK_SEQPACKET, 0);
+.fi
+.PP
+.\"------------------------------------------------------------------
+.SS Socket Options
+RDS sockets support a number of socket options through the
+.BR setsockopt (2)
+and
+.BR getsockopt (2)
+calls. The following generic options (with socket level
+.BR SOL_SOCKET )
+are of specific importance:
+.TP
+.B SO_RCVBUF
+Specifies the size of the receive buffer. See section on
+"Congestion Control" below.
+.TP
+.B SO_SNDBUF
+Specifies the size of the send buffer. See "Message Transmission"
+below.
+.TP
+.B SO_SNDTIMEO
+Specifies the send timeout when trying to enqueue a message on a
+socket with a full queue in blocking mode.
+.PP
+In addition to these, RDS supports a number of protocol specific
+options (with socket level
+.BR SOL_RDS ).
+Just as with the RDS protocol family, an official value has not been
+assigned yet, so the kernel will assign a value dynamically.
+The assigned value can be retrieved from the
+.B sol_rds
+sysctl parameter file.
+.PP
+RDS specific socket options will be described in a separate section
+below.
+.\"------------------------------------------------------------------
+.SS Binding
+A new RDS socket has no local address when it is first returned from
+.BR socket (2).
+It must be bound to a local address by calling
+.BR bind (2)
+before any messages can be sent or received. This will also attach the
+socket to a specific transport, based on the type of interface the
+local address is attached to.  From that point on, the socket can only
+reach destinations which are available through this transport.
+.PP
+For instance, when binding to the address of an Infiniband interface
+such as
+.BR ib0 ,
+the socket will use the Infiniband transport. If RDS is not able
+to associate a transport with the given address, it will return
+.BR EADDRNOTAVAIL .
+.PP
+An RDS socket can only be bound to one address and only one socket can
+be bound to a given address/port pair. If no port is specified in the
+binding address then an unbound port is selected at random.
+.PP
+RDS does not allow the application to bind a previously bound socket
+to another address. Binding to the wildcard address
+.B INADDR_ANY
+is not permitted either.
+.\"------------------------------------------------------------------
+.SS Connecting
+The default mode of operation for RDS is to use unconnected socket,
+and specify a destination address as an argument to
+.BR sendmsg .
+However, RDS allows sockets to be connected to a remote end point using
+.BR connect (2).
+If a socket is connected, calling
+.BR sendmsg
+without specifying a destination address will use the previously given
+remote address.
+.\"------------------------------------------------------------------
+.SS Congestion Control
+RDS does not have explicit congestion control like common
+streaming protocols such as TCP. However, sockets have two queue limits
+associated with them; the send queue size and the receive queue size.
+Messages are accounted based on the number of bytes of payload.
+.PP
+The send queue size limits how much data local processes can queue on
+a local socket (see the following section). If that limit is exceeded,
+the kernel will not accept further messages until the queue is drained
+and messages have been delivered to and acknowledged by the remote host.
+.PP
+The receive queue size limits how much data RDS will put on the receive
+queue of a socket before marking the socket as
+.IR congested .
+When a socket becomes congested, RDS will send a
+.I congestion map update
+to the other participating hosts, who are then expected to stop sending
+more messages to this port.
+.PP
+There is a timing window during which a remote host can still continue
+to send messages to a congested port; RDS solves this by accepting
+these messages even if the socket's receive queue is already over
+the limit.
+.PP
+As the application pulls incoming messages off the receive queue using
+.BR recvmsg (2),
+the number of bytes on the receive queue will eventually
+drop below the receive queue size, at which point the port is then
+marked uncongested, and another congestion update is sent to all
+participating hosts. This tells them to allow applications to send
+additional messages to this port.
+.PP
+The default values for the send and receive buffer size are controlled
+by the
+A given RDS socket has limited transmit buffer space. It defaults to
+the system wide socket send buffer size set in the
+.B wmem_default
+and
+.B rmem_default
+sysctls, respectively. They can be tuned by the application through the
+.B SO_SNDBUF
+and
+.B SO_RCVBUF
+socket options.
+.PP
+.\"------------------------------------------------------------------
+.SS Blocking Behavior
+The
+.BR sendmsg (2)
+and
+.BR recvmsg (2)
+calls can block in a variety of situations.
+Whether a call blocks or returns with an error depends on the non-blocking
+setting of the file descriptor and the
+.B MSG_DONTWAIT
+message flag. If the file descriptor is set to blocking mode (which is the
+default), and the
+.B MSG_DONTWAIT
+flag is
+.I not
+given, the call will block.
+.PP
+In addition, the
+.B SO_SNDTIMEO
+and
+.B SO_RCVTIMEO
+socket options can be used to specify a timeout (in seconds) after
+which the call will abort waiting, and return an error. The default
+timeout is 0, which tells RDS to block indefinitely.
+.\"------------------------------------------------------------------
+.SS Message Transmission
+Messages may be sent using
+.BR sendmsg (2)
+once the RDS socket is bound. Message length cannot exceed 4 gigabytes
+as the wire protocol uses an unsigned 32 bit integer to express the
+message length.
+.PP
+RDS does not support out of band data. Applications are allowed to
+send to unicast addresses only; broadcast or multicast are not
+supported.
+.PP
+A successful
+.BR sendmsg (2)
+call puts the message in the socket's transmit queue where it will
+remain until either the destination acknowledges that the message is
+no longer in the network or the application removes the message from
+the send queue.
+.PP
+Messages can be removed from the send queue with the
+RDS_CANCEL_SENT_TO socket option described below.
+.PP
+While a message is in the transmit queue its payload bytes are accounted for.
+If an attempt is made to send a message while there is not sufficient
+room on the transmit queue, the call will either block or return
+.BR EAGAIN .
+.PP
+Trying to send to a destination that is marked congested (see above),
+the call will either block or return
+.BR ENOBUFS .
+.PP
+A message sent with no payload bytes will not consume any space in the
+destination's send buffer but will result in a message receipt on the
+destination. The receiver will not get any payload data but will be able
+to see the sender's address.
+.PP
+Messages sent to a port to which no socket is bound will be silently
+discarded by the destination host. No error messages are reported
+to the sender.
+.\"------------------------------------------------------------------
+.SS Message Receipt
+Messages may be received with
+.BR recvmsg (2)
+on an RDS socket once it is bound to a source address. RDS will return
+messages in-order, i.e. messages from the same sender will arrive in
+the same order in which they were be sent.
+.PP
+The address of the sender will be returned in the
+.B sockaddr_in
+structure pointed to by the
+.B msg_name
+field, if set.
+.PP
+If the
+.B MSG_PEEK
+flag is given, the first message on the receive is returned without
+removing it from the queue.
+.PP
+The memory consumed by messages waiting for delivery does not limit
+the number of messages that can be queued for receive. RDS does attempt
+to perform congestion control as described in the section above.
+.PP
+If the length of the message exceeds the size of the buffer provided to
+.BR recvmsg (2),
+then the remainder of the bytes in the message are discarded and the
+.BR MSG_TRUNC
+flag is set in the msg_flags field. In this truncating case
+.BR recvmsg (2)
+will still return the number of bytes copied, not the length of entire messge.
+If
+.BR MSG_TRUNC
+is set in the flags argument to
+.BR recvmsg (2),
+then it will return the number of bytes in the entire message. Thus one
+can examine the size of the next message in the receive queue without incurring
+a copying overhead by providing a zero length buffer and setting
+.BR MSG_PEEK " and " MSG_TRUNC
+in the flags argument.
+.PP
+The sending address of a zero-length message will still be provided in the
+.B msg_name
+field.
+.\"------------------------------------------------------------------
+.SS Control Messages
+RDS uses control messages (a.k.a. ancillary data) through the
+.B msg_control
+and
+.B msg_controllen
+fields in
+.BR sendmsg (2)
+and
+.BR recvmsg (2).
+Control messages generated by RDS have a
+.BR cmsg_level
+value of
+.BR sol_rds .
+Most control messages are related to the zerocopy interface added in
+RDS version 3, and are described in
+.BR rds-rdma (7).
+.PP
+The only exception is the
+.BR RDS_CMSG_CONG_UPDATE
+message, which is described in the following section.
+.\"------------------------------------------------------------------
+.SS Polling
+RDS supports the
+.BR poll (2)
+interface in a limited fashion.
+.B POLLIN
+is returned when there is a message (either a proper RDS message,
+or a control message) waiting in the socket's receive queue.
+.B POLLOUT
+is always returned while there is room on the socket's send queue.
+.PP
+Sending to congested ports requires special handling. When an application
+tries to send to a congested destination, the system call will return
+.BR ENOBUFS .
+However, it cannot poll for
+.BR POLLOUT ,
+as there is probably still room on the transmit queue, so the call to
+.BR poll (2)
+would return immediately, even though the destination is still congested.
+.PP
+There are two ways of dealing with this situation. The first is to
+simply poll for
+.BR POLLIN .
+By default, a process sleeping in
+.BR poll (2)
+is always woken up when the congestion map is updated,
+and thus the application can retry any previously congested
+sends.
+.PP
+The second option is explicit congestion monitoring, which
+gives the application more fine-grained control.
+.PP
+With explicit monitoring, the application polls for
+.B POLLIN
+as before, and additionally uses the
+.BR RDS_CONG_MONITOR
+socket option to install a 64bit mask value in the socket, where each
+bit corresponds to a group of ports. When a congestion update arrives,
+RDS checks the set of ports that became uncongested against the bit mask
+installed in the socket. If they overlap, a control messages is
+enqueued on the socket, and the application is woken up. When it calls
+.BR recvmsg (2),
+it will be given the control message containing the bitmap.
+on the socket.
+.PP
+The congestion monitor bitmask can be set and queried using
+.BR setsockopt (2)
+with
+.BR RDS_CONG_MONITOR ,
+and a pointer to the 64bit mask variable.
+.PP
+Congestion updates are delivered to the application via
+.B RDS_CMSG_CONG_UPDATE
+control messages. These control messages are always delivered
+by themselves (or possibly additional control messages), but never
+along with a RDS data message. The
+.BR cmsg_data
+field of the control message is an 8 byte datum containing the
+64bit mask value.
+.PP
+Applications can use the following macros to test for and set bits
+in the bitmask:
+.PP
+.nf
+#define RDS_CONG_MONITOR_SIZE   64
+#define RDS_CONG_MONITOR_BIT(port)  (((unsigned int) port) % RDS_CONG_MONITOR_SIZE)
+#define RDS_CONG_MONITOR_MASK(port) (1 << RDS_CONG_MONITOR_BIT(port))
+.fi
+.PP
+.\"------------------------------------------------------------------
+.SS Canceling Messages
+An application can cancel (flush) messages from the send queue using
+the
+.BR RDS_CANCEL_SENT_TO
+socket option with
+.BR setsockopt (2).
+This call takes an optional
+.B sockaddr_in
+address structure as argument. If given, only messages to the destination
+specified by this address are discarded. If no address is given, all
+pending messages are discarded.
+.PP
+Note that this affects messages that have not yet been transmitted
+as well as messages that have been transmitted, but for which no
+acknowledgment from the remote host has been received yet.
+.\"------------------------------------------------------------------
+.SS Reliability
+If
+.BR sendmsg (2)
+succeeds, RDS guarantees that the  message  will  be visible  to
+.BR recvmsg (2)
+on a socket bound to the destination address as long as that
+destination socket remains open.
+.PP
+If there is no socket bound on the  destination,  the  message  is
+silently  dropped.   If  the sending RDS can't be sure that there is no
+socket bound then it will try to send the message indefinitely until it
+can be sure or the sent message is canceled.
+.PP
+If  a socket is closed then all pending sent messages on the socket are
+canceled and may or may not be seen by the receiver.
+.PP
+The RDS_CANCEL_SENT_TO socket option can be used to cancel all  pending
+messages to a given destination.
+.PP
+If  a  receiving socket is closed with pending messages then the sender
+considers those messages as  having  left  the  network	and  will  not
+retransmit them.
+.PP
+A  message will only be seen by
+.BR recvmsg (2)
+once, unless
+.B MSG_PEEK
+was specified. Once the message has been delivered it is removed
+from the sending socket's transmit queue.
+.PP
+All messages sent from the same socket to the same destination will
+be delivered in the order they're sent. Messages sent from different
+sockets, or to different destinations, may be delivered in any order.
+.\"------------------------------------------------------------------
+.SH SYSCTL VALUES
+These parameteres may only be accessed through their files in
+.BR /proc/sys/net/rds .
+Access through
+.BR sysctl (2)
+is not supported.
+.TP
+.B pf_rds
+This file contains the string representation of the protocol family
+constant passed to
+.BR socket (2)
+to create a new RDS socket.
+.TP
+.B sol_rds
+This file contains the string representation of the socket level parameter
+that is passed to
+.BR getsockopt (2)
+and
+.BR setsockopt (2)
+to manipulate RDS socket options.
+.TP
+.BR max_unacked_bytes " and " max_unacked_packets
+These parameters are used to tune the generation of acknowledgements. By
+default, the system receiving RDS messages does not send back explicit
+acknowledgements unless it transmits a message of its own (in which
+case the ACK is piggybacked onto the outgoing message), or when the sending
+system requests an ACK.
+.IP
+However, the sender needs to see an ACK from time to time so that it
+can purge old messages from the send queue. The unacked bytes and
+packet counters are used to keep track of how much data has been
+sent without requesting an ACK. The default is to request an acknowledgement
+every 16 packets, or every 16 MB, whichever comes first.
+.TP
+.BR reconnect_delay_min_ms " and " reconnect_delay_max_ms
+RDS uses host-to-host connections to transport RDS messages (both for the TCP
+and the Infiniband transport). If this connection breaks, RDS will try to
+re-establish the connection. Because this reconnect may be triggered by
+both hosts at the same time and fail, RDS uses a random backoff before attempting
+a reconnect. These two parameters specify the minimum and maximum delay in
+milliseconds. The default values are 1 and 1000, respectively.
+.SH SEE ALSO
+.BR rds-rdma (7),
+.BR socket (2),
+.BR bind (2),
+.BR sendmsg (2),
+.BR recvmsg (2),
+.BR getsockopt(2),
+.BR setsockopt (2).

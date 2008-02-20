@@ -213,11 +213,11 @@ struct rds_rdma_args {
 	u_int64_t	local_vec_addr;
 	u_int64_t	nr_local;
 	u_int64_t	flags;
-	u_int32_t	user_token;
+	u_int64_t	user_token;
 };
 
 struct rds_rdma_notify {
-	u_int32_t	user_token;
+	u_int64_t	user_token;
 	int32_t		status;
 };
 

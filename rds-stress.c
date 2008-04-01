@@ -60,6 +60,7 @@ struct options {
 	uint8_t		use_cong_monitor;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
+	uint8_t		rdma_cache_mrs;
 	unsigned int	rdma_alignment;
 	unsigned int	connect_retries;
 
@@ -879,7 +880,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		  (unsigned long long) hdr->rdma_addr);
 
 	/* Need to free the MR unless allocated with use_once */
-	if (!opt.rdma_use_once)
+	if (!opt.rdma_use_once && !opt.rdma_cache_mrs)
 		free_rdma_key(fd, hdr->rdma_key);
 
 	/* if acking an rdma write request - then remote node wrote local host buffer
@@ -1023,7 +1024,8 @@ static int send_one(int fd, struct task *t,
 		return ret;
 
 	t->send_time[t->send_index] = start;
-	t->rdma_req_key[t->send_index] = 0; /* we consumed this key */
+	if (!opts->rdma_cache_mrs)
+		t->rdma_req_key[t->send_index] = 0; /* we consumed this key */
 	stat_inc(&ctl->cur[S_REQ_TX_BYTES], ret);
 	stat_inc(&ctl->cur[S_SENDMSG_USECS],
 		 usec_sub(&stop, &start));
@@ -1945,6 +1947,9 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 		if (opts->rdma_use_get_mr) {
 			printf(" use_get_mr"); ++k;
 		}
+		if (opts->rdma_cache_mrs) {
+			printf(" cache_mrs"); ++k;
+		}
 		if (opts->rdma_alignment) {
 			printf(" align=%u", opts->rdma_alignment); ++k;
 		}
@@ -2138,6 +2143,7 @@ enum {
 	OPT_RDMA_USE_ONCE = 0x100,
 	OPT_RDMA_USE_GET_MR,
 	OPT_RDMA_USE_NOTIFY,
+	OPT_RDMA_CACHE_MRS,
 	OPT_RDMA_ALIGNMENT,
 	OPT_SHOW_PARAMS,
 	OPT_CONNECT_RETRIES,
@@ -2164,6 +2170,7 @@ static struct option long_options[] = {
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
+{ "rdma-cache-mrs",	required_argument,	NULL,	OPT_RDMA_CACHE_MRS },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 { "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
 { "show-perfdata",	no_argument,		NULL,	OPT_PERFDATA },
@@ -2208,8 +2215,7 @@ int main(int argc, char **argv)
 	opts.verify = 0;
 	opts.rdma_size = 0;
 	opts.use_cong_monitor = 1;
-	opts.rdma_use_once = 1;
-	opts.rdma_use_get_mr = 0;
+	opts.rdma_cache_mrs = 0;
 	opts.rdma_alignment = 0;
 	opts.show_params = 0;
 	opts.connect_retries = 0;
@@ -2277,6 +2283,9 @@ int main(int argc, char **argv)
 			case OPT_RDMA_USE_GET_MR:
 				opts.rdma_use_get_mr = parse_ull(optarg, 1);
 				break;
+			case OPT_RDMA_CACHE_MRS:
+				opts.rdma_cache_mrs = parse_ull(optarg, 1);
+				break;
 			case OPT_RDMA_USE_NOTIFY:
 				(void) parse_ull(optarg, 1);
 				break;
@@ -2304,6 +2313,15 @@ int main(int argc, char **argv)
 		die("specify starting port with -p\n");
 	if (opts.receive_addr == ~0)
 		die("specify receiving addr with -r\n");
+
+	if (opts.rdma_use_once == 0xff)
+		opts.rdma_use_once = !opts.rdma_cache_mrs;
+	else if (opts.rdma_cache_mrs && opts.rdma_use_once)
+		die("option --rdma-cache-mrs conflicts with --rdma-use-once\n");
+	if (opts.rdma_use_get_mr == 0xff)
+		opts.rdma_use_get_mr = opts.rdma_cache_mrs;
+	else if (opts.rdma_cache_mrs && !opts.rdma_use_get_mr)
+		die("option --rdma-cache-mrs conflicts with --rdma-use-get-mr=0\n");
 
 	/* the passive parent will read options off the wire */
 	if (opts.send_addr == ~0)

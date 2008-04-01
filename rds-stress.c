@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <getopt.h>
+#include <byteswap.h>
 #include "net/rds.h"
 
 #ifdef DYNAMIC_PF_RDS
@@ -62,13 +63,10 @@ struct options {
 	uint8_t		rdma_use_get_mr;
 	uint8_t		rdma_use_fence;
 	uint8_t		rdma_cache_mrs;
-	unsigned int	rdma_alignment;
-	unsigned int	connect_retries;
-
-	/* At 1024 tasks, printing warnings about
-	 * setsockopt(SNDBUF) allocation is rather
-	 * slow. Cut that */
 	uint8_t		suppress_warnings;
+
+	uint32_t	rdma_alignment;
+	uint32_t	connect_retries;
 } __attribute__((packed));
 
 static struct options	opt;
@@ -315,16 +313,64 @@ static void init_msg_pattern(struct options *opts)
 		msg_pattern[i] = k;
 }
 
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define htonll(x)	bswap_64(x)
+#define ntohll(x)	bswap_64(x)
+#else
+#define htonll(x)	(x)
+#define ntohll(x)	(x)
+#endif
+
+static void encode_hdr(struct header *dst, const struct header *hdr)
+{
+	memset(dst, 0, sizeof(*dst));
+
+	dst->seq = htonl(hdr->seq);
+	dst->from_addr = hdr->from_addr;	/* always network byte order */
+	dst->from_port = hdr->from_port;	/* ditto */
+	dst->to_addr = hdr->to_addr;		/* ditto */
+	dst->to_port = hdr->to_port;		/* ditto */
+	dst->index = htons(hdr->index);
+	dst->op = hdr->op;
+
+	dst->rdma_op = hdr->rdma_op;
+	dst->rdma_addr = htonll(hdr->rdma_addr);
+	dst->rdma_phyaddr = htonll(hdr->rdma_phyaddr);
+	dst->rdma_pattern = htonll(hdr->rdma_pattern);
+	dst->rdma_key = htonll(hdr->rdma_key);
+	dst->rdma_size = htonl(hdr->rdma_size);
+}
+
+static void decode_hdr(struct header *dst, const struct header *hdr)
+{
+	memset(dst, 0, sizeof(*dst));
+
+	dst->seq = ntohl(hdr->seq);
+	dst->from_addr = hdr->from_addr;	/* always network byte order */
+	dst->from_port = hdr->from_port;	/* ditto */
+	dst->to_addr = hdr->to_addr;		/* ditto */
+	dst->to_port = hdr->to_port;		/* ditto */
+	dst->index = ntohs(hdr->index);
+	dst->op = hdr->op;
+
+	dst->rdma_op = hdr->rdma_op;
+	dst->rdma_addr = ntohll(hdr->rdma_addr);
+	dst->rdma_phyaddr = ntohll(hdr->rdma_phyaddr);
+	dst->rdma_pattern = ntohll(hdr->rdma_pattern);
+	dst->rdma_key = ntohll(hdr->rdma_key);
+	dst->rdma_size = ntohl(hdr->rdma_size);
+}
+
 static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
 {
-	memcpy(message, hdr, sizeof(*hdr));
+	encode_hdr(message, hdr);
 	if (opt.verify)
 		memcpy(message + sizeof(*hdr), msg_pattern, bytes - sizeof(*hdr));
 }
 
 /* inet_ntoa uses a static buffer, so calling it twice in
  * a single printf as we do below will produce undefined
- * results. We copy the output two two static buffers,
+ * results. We copy the output to two static buffers,
  * and switch between them.
  */
 static char *inet_ntoa_32(uint32_t val)
@@ -339,15 +385,20 @@ static char *inet_ntoa_32(uint32_t val)
 	return buffer[select];
 }
 
+/*
+ * Compare incoming message header with expected header. All header fields
+ * are in host byte order except for address and port fields.
+ */
 static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 {
-	if (memcmp(message, hdr, BASIC_HEADER_SIZE)) {
-		struct header *chk = (struct header *) message;
+	struct header msghdr;
 
+	decode_hdr(&msghdr, message);
+	if (memcmp(&msghdr, hdr, BASIC_HEADER_SIZE)) {
 #define bleh(var, disp)					\
 		disp(hdr->var),				\
-		chk->var == hdr->var ? " =" : "!=",	\
-		disp(chk->var)
+		msghdr.var == hdr->var ? " =" : "!=",	\
+		disp(msghdr.var)
 
 		/* 
 		 * This is printed as one GIANT printf() so that it serializes
@@ -364,13 +415,13 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 			"   to_port %15u %s %15u\n"
 			"     index %15u %s %15u\n"
 			"        op %15u %s %15u\n",
-			bleh(seq, ntohl),
+			bleh(seq, /**/),
 			bleh(from_addr, inet_ntoa_32),
 			bleh(from_port, ntohs),
 			bleh(to_addr, inet_ntoa_32),
 			bleh(to_port, ntohs),
-			bleh(index, ntohs),
-			bleh(op, (uint8_t)));
+			bleh(index, /**/),
+			bleh(op, /**/));
 #undef bleh
 
 		return 1;
@@ -677,7 +728,6 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 	hdr->rdma_op = t->rdma_next_op;
 	t->rdma_next_op = RDMA_OP_TOGGLE(t->rdma_next_op);
 
-	/* FIXME! rdma_size and req_depth need htonl */
 	hdr->rdma_pattern = (((uint64_t) t->send_seq) << 32) | getpid();
 	hdr->rdma_addr = ptr64(rdma_addr);
 	hdr->rdma_phyaddr = 0;
@@ -705,7 +755,7 @@ static void rdma_validate(const struct header *in_hdr, struct options *opts)
 {
 	unsigned long	rdma_size;
 
-	rdma_size = in_hdr->rdma_size;      /* ntohl? */
+	rdma_size = in_hdr->rdma_size;
 	if (rdma_size != opts->rdma_size)
 		die("Unexpected RDMA size %lu in request\n", rdma_size);
 
@@ -805,7 +855,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 	struct rds_rdma_args args;
 	unsigned int rdma_size;
 
-	rdma_size = hdr->rdma_size;	/* ntohl? */
+	rdma_size = hdr->rdma_size;
 
 	trace("RDS issuing rdma for token %x key %Lx len %u local_buf %p\n",
 			user_token,
@@ -878,7 +928,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 	trace("RDS rcvd rdma %s ACK for request key %Lx len %u local addr %Lx\n",
 		  RDMA_OP_WRITE == hdr->rdma_op ? "write" : "read",
 		  (unsigned long long) hdr->rdma_key,
-		  hdr->rdma_size,	/* XXX ntohl? */
+		  hdr->rdma_size,
 		  (unsigned long long) hdr->rdma_addr);
 
 	/* Need to free the MR unless allocated with use_once */
@@ -900,7 +950,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 			/* This funny looking cast avoids compile warnings
 			 * on 32bit platforms. */
 			rds_compare_buffer((void *)(unsigned long) hdr->rdma_addr,
-				hdr->rdma_size, 	/* XXX ntohl? */
+				hdr->rdma_size,
 				hdr->rdma_pattern);
 		}
 		break;
@@ -916,12 +966,12 @@ static void build_header(struct task *t, struct header *hdr,
 {
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->op = op;
-	hdr->seq = htonl(t->send_seq);
+	hdr->seq = t->send_seq;
 	hdr->from_addr = t->src_addr.sin_addr.s_addr;
 	hdr->from_port = t->src_addr.sin_port;
 	hdr->to_addr = t->dst_addr.sin_addr.s_addr;
 	hdr->to_port = t->dst_addr.sin_port;
-	hdr->index = htons(qindex);
+	hdr->index = qindex;
 }
 
 static int send_packet(int fd, struct task *t,
@@ -935,7 +985,7 @@ static int send_packet(int fd, struct task *t,
 	/* Make sure we always have the current sequence number.
 	 * When we send ACK packets, the seq that gets filled in is
 	 * stale. */
-	hdr->seq = ntohl(t->send_seq);
+	hdr->seq = t->send_seq;
 	fill_hdr(buf, size, hdr);
 
 	memset(&msg, 0, sizeof(msg));
@@ -966,7 +1016,7 @@ static int send_packet(int fd, struct task *t,
 	/* If this is an ACK packet with RDMA, build the cmsg
 	 * header that goes with it. */
 	if (hdr->op == OP_ACK && hdr->rdma_op != 0) {
-		unsigned int qindex = ntohs(hdr->index);
+		unsigned int qindex = hdr->index;
 
 		if (t->rdma_inflight[qindex] != 0) {
 			/* It is unlikely but (provably) possible for
@@ -1182,7 +1232,7 @@ static int recv_one(int fd, struct task *tasks,
 	char buf[max(opts->req_size, opts->ack_size)];
 	rds_rdma_cookie_t rdma_dest = 0;
 	struct sockaddr_in sin;
-	struct header hdr, *in_hdr;
+	struct header hdr, in_hdr;
 	struct timeval tstamp;
 	struct task *t;
 	uint16_t expect_index;
@@ -1204,9 +1254,9 @@ static int recv_one(int fd, struct task *tasks,
 		die("received bad task index %u\n", task_index);
 	t = &tasks[task_index];
 
-	/* make sure the incoming message's size matches is op */
-	in_hdr = (void *)buf;
-	switch(in_hdr->op) {
+	/* make sure the incoming message's size matches its op */
+	decode_hdr(&in_hdr, (struct header *) buf);
+	switch(in_hdr.op) {
 	case OP_REQ:
 		stat_inc(&ctl->cur[S_REQ_RX_BYTES], ret);
 		if (ret != opts->req_size)
@@ -1224,7 +1274,7 @@ static int recv_one(int fd, struct task *tasks,
 		expect_index = (t->send_index - t->pending + opts->req_depth) % opts->req_depth;
 		break;
 	default:
-		die("unknown op %u\n", in_hdr->op);
+		die("unknown op %u\n", in_hdr.op);
 	}
 
 	/*
@@ -1232,13 +1282,13 @@ static int recv_one(int fd, struct task *tasks,
 	 * is the next in-order message to us.  We can't predict
 	 * op.
 	 */
-	hdr.op = in_hdr->op;
-	hdr.seq = htonl(t->recv_seq);
+	hdr.op = in_hdr.op;
+	hdr.seq = t->recv_seq;
 	hdr.from_addr = sin.sin_addr.s_addr;
 	hdr.from_port = sin.sin_port;
 	hdr.to_addr = t->src_addr.sin_addr.s_addr;
 	hdr.to_port = t->src_addr.sin_port;
-	hdr.index = htons(expect_index);
+	hdr.index = expect_index;
 
 	if (check_hdr(buf, ret, &hdr))
 		die("header from %s:%u to id %u bogus\n",
@@ -1250,8 +1300,8 @@ static int recv_one(int fd, struct task *tasks,
 			 usec_sub(&tstamp, &t->send_time[expect_index]));
 		t->pending -= 1;
 
-		if (in_hdr->rdma_key)
-			rdma_process_ack(fd, in_hdr, ctl);
+		if (in_hdr.rdma_key)
+			rdma_process_ack(fd, &in_hdr, ctl);
 	} else {
 		struct header *ack_hdr;
 
@@ -1266,10 +1316,10 @@ static int recv_one(int fd, struct task *tasks,
 		 * to pick them up from.
 		 */
 		if (rdma_dest)
-			in_hdr->rdma_key = rdma_dest;
-		if (in_hdr->rdma_key) {
-			rdma_validate(in_hdr, opts);
-			rdma_build_ack(ack_hdr, in_hdr);
+			in_hdr.rdma_key = rdma_dest;
+		if (in_hdr.rdma_key) {
+			rdma_validate(&in_hdr, opts);
+			rdma_build_ack(ack_hdr, &in_hdr);
 		}
 
 		t->unacked += 1;
@@ -1921,8 +1971,86 @@ static void peer_recv(int fd, void *ptr, size_t size)
 	}
 }
 
+static void encode_options(struct options *dst, const struct options *src)
+{
+	dst->req_depth = htonl(src->req_depth);
+	dst->req_size = htonl(src->req_size);
+	dst->ack_size = htonl(src->ack_size);
+	dst->rdma_size = htonl(src->rdma_size);
+	dst->send_addr = src->send_addr;		/* network byte order */
+	dst->receive_addr = src->receive_addr;		/* network byte order */
+	dst->starting_port = src->starting_port;	/* network byte order */
+	dst->nr_tasks = htons(src->nr_tasks);
+	dst->run_time = htonl(src->run_time);
+	dst->summary_only = src->summary_only;		/* byte sized */
+	dst->rtprio = src->rtprio;			/* byte sized */
+	dst->tracing = src->tracing;			/* byte sized */
+	dst->verify = src->verify;			/* byte sized */
+	dst->show_params = src->show_params;		/* byte sized */
+	dst->show_perfdata = src->show_perfdata;	/* byte sized */
+	dst->use_cong_monitor = src->use_cong_monitor;	/* byte sized */
+	dst->rdma_use_once = src->rdma_use_once;	/* byte sized */
+	dst->rdma_use_get_mr = src->rdma_use_get_mr;	/* byte sized */
+	dst->rdma_use_fence = src->rdma_use_fence;	/* byte sized */
+	dst->rdma_cache_mrs = src->rdma_cache_mrs;	/* byte sized */
+
+	dst->rdma_alignment = htonl(src->rdma_alignment);
+	dst->connect_retries = htonl(src->connect_retries);
+
+	dst->suppress_warnings = src->suppress_warnings;/* byte sized */
+}
+
+static void decode_options(struct options *dst, const struct options *src)
+{
+	dst->req_depth = ntohl(src->req_depth);
+	dst->req_size = ntohl(src->req_size);
+	dst->ack_size = ntohl(src->ack_size);
+	dst->rdma_size = ntohl(src->rdma_size);
+	dst->send_addr = src->send_addr;		/* network byte order */
+	dst->receive_addr = src->receive_addr;		/* network byte order */
+	dst->starting_port = src->starting_port;	/* network byte order */
+	dst->nr_tasks = ntohs(src->nr_tasks);
+	dst->run_time = ntohl(src->run_time);
+	dst->summary_only = src->summary_only;		/* byte sized */
+	dst->rtprio = src->rtprio;			/* byte sized */
+	dst->tracing = src->tracing;			/* byte sized */
+	dst->verify = src->verify;			/* byte sized */
+	dst->show_params = src->show_params;		/* byte sized */
+	dst->show_perfdata = src->show_perfdata;	/* byte sized */
+	dst->use_cong_monitor = src->use_cong_monitor;	/* byte sized */
+	dst->rdma_use_once = src->rdma_use_once;	/* byte sized */
+	dst->rdma_use_get_mr = src->rdma_use_get_mr;	/* byte sized */
+	dst->rdma_use_fence = src->rdma_use_fence;	/* byte sized */
+	dst->rdma_cache_mrs = src->rdma_cache_mrs;	/* byte sized */
+
+	dst->rdma_alignment = ntohl(src->rdma_alignment);
+	dst->connect_retries = ntohl(src->connect_retries);
+
+	dst->suppress_warnings = src->suppress_warnings;/* byte sized */
+}
+
+static void verify_option_encdec(const struct options *opts)
+{
+	struct options ebuf, dbuf;
+	unsigned int i;
+
+	memcpy(&dbuf, opts, sizeof(*opts));
+	for (i = 0; i < sizeof(*opts); ++i) {
+		unsigned char *x = &((unsigned char *) &dbuf)[i];
+
+		*x = ~*x;
+	}
+
+	encode_options(&ebuf, opts);
+	decode_options(&dbuf, &ebuf);
+
+	if (memcmp(&dbuf, opts, sizeof(*opts)))
+		die("encode/decode check of options struct failed");
+}
+
 static int active_parent(struct options *opts, struct soak_control *soak_arr)
 {
+	struct options enc_options;
 	struct child_control *ctl;
 	struct sockaddr_in sin;
 	int fd;
@@ -1964,6 +2092,10 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 		printf("\n");
 	}
 
+	/* Make sure that when we add new options, we don't forget
+	 * to add them to the encode/decode routines. */
+	verify_option_encdec(opts);
+
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
@@ -1979,7 +2111,8 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	/* "negotiation" is overstating things a bit :-)
 	 * We just tell the peer what options to use.
 	 */
-	peer_send(fd, opts, sizeof(struct options));
+	encode_options(&enc_options, opts);
+	peer_send(fd, &enc_options, sizeof(struct options));
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
 	ctl = start_children(opts);
@@ -2002,7 +2135,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 static int passive_parent(uint32_t addr, uint16_t port,
 			  struct soak_control *soak_arr)
 {
-	struct options remote, *opts = &remote;
+	struct options remote, *opts;
 	struct child_control *ctl;
 	struct sockaddr_in sin;
 	socklen_t socklen;
@@ -2031,7 +2164,9 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	printf("accepted connection from %s:%u\n", inet_ntoa(sin.sin_addr),
 		ntohs(sin.sin_port));
 
-	peer_recv(fd, opts, sizeof(struct options));
+	peer_recv(fd, &remote, sizeof(struct options));
+	decode_options(&remote, &remote);
+	opts = &remote;
 
 	/*
 	 * The sender gave us their send and receive addresses, we need

@@ -2203,6 +2203,7 @@ int main(int argc, char **argv)
 	opts.req_size = 1024;
 	opts.run_time = 0;
 	opts.summary_only = 0;
+	opts.rtprio = 0;
 	opts.tracing = 0;
 	opts.verify = 0;
 	opts.rdma_size = 0;

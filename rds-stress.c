@@ -18,6 +18,7 @@
 #include <syscall.h>
 #include <sys/stat.h>
 #include <sys/poll.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <getopt.h>
@@ -55,6 +56,7 @@ struct options {
 	uint8_t		tracing;
 	uint8_t		verify;
 	uint8_t		show_params;
+	uint8_t		show_perfdata;
 	uint8_t		use_cong_monitor;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
@@ -1512,6 +1514,162 @@ static double cpu_use(struct soak_control *soak_arr)
 	return (double)(capacity - soaked) * 100 / (double)capacity;
 }
 
+static void
+get_stats(int initialize)
+{
+#define NTIMES 8
+	struct sys_stats {
+		/* Where we spent out time */
+		unsigned long long	times[NTIMES];
+		unsigned long long	other;
+
+		/* Interrupt count */
+		unsigned long long	intr;
+	};
+	static struct sys_stats prev, current;
+	static int disable = 0;
+	char buffer[2048];
+	FILE *fp;
+
+	if (disable)
+		return;
+	if ((fp = fopen("/proc/stat", "r")) == NULL) {
+		fprintf(stderr, "Cannot open /proc/stat (%s) - "
+				"not printing cpu stats\n",
+				strerror(errno));
+		disable = 1;
+		return;
+	}
+
+	memset(&current, 0, sizeof(current));
+	while (fgets(buffer, sizeof(buffer), fp)) {
+		if (!strncmp(buffer, "cpu ", 4)) {
+			char	*s = buffer + 4;
+			int	j;
+
+			for (j = 0; 1; ++j) {
+				unsigned long long v;
+
+				while (*s == ' ')
+					++s;
+				if (!isdigit(*s))
+					break;
+				v = strtoull(s, &s, 10);
+				if (j < NTIMES)
+					current.times[j] = v;
+				else
+					current.other += v;
+			}
+		} else
+		if (!strncmp(buffer, "intr ", 5)) {
+			sscanf(buffer + 5, "%Lu", &current.intr);
+		}
+	}
+	fclose(fp);
+
+	if (initialize) {
+		printf(",user:percent,system:percent,idle:percent"
+		       ",irq:percent,intr:count");
+	} else {
+		struct sys_stats sys;
+		unsigned long sum = 0;
+		double scale;
+		int j;
+
+		sum = sys.other = current.other - prev.other;
+		for (j = 0; j < NTIMES; ++j) {
+			sys.times[j] = current.times[j] - prev.times[j];
+			sum += current.times[j];
+		}
+		sys.intr = current.intr - prev.intr;
+
+		scale = sum? 100.0 / sum : 0;
+
+		/* Magic procfs offsets
+		 *  0	user
+		 *  1	nice
+		 *  2	system
+		 *  3	idle
+		 *  4	iowait
+		 *  5	irq
+		 *  6	softirq
+		 */
+		printf(",%f,%f,%f,%f,%Lu",
+			(sys.times[0] + sys.times[1]) * scale,
+			sys.times[2] * scale,
+			(sys.times[3] + sys.times[4]) * scale,
+			(sys.times[5] + sys.times[6]) * scale,
+			sys.intr);
+	}
+	prev = current;
+}
+
+static void
+get_perfdata(int initialize)
+{
+	static struct timeval last_ts, now;
+	static struct rds_info_counter *prev, *ctr;
+	static unsigned char *curr = NULL;
+	static socklen_t buflen = 0;
+	static int sock_fd = -1;
+	int i, count, item_size;
+
+	if (sock_fd < 0) {
+		sock_fd = socket(PF_RDS, SOCK_SEQPACKET, 0);
+		if (sock_fd < 0)
+			die_errno("Unable to create socket");
+	}
+
+	/* We should only loop once on the first call; after that the
+	 * buffer requirements for RDS counters should not change. */
+	while ((item_size = getsockopt(sock_fd, SOL_RDS, RDS_INFO_COUNTERS, curr, &buflen)) < 0) {
+		if (errno != ENOSPC)
+			die_errno("getsockopt(RDS_INFO_COUNTERS) failed");
+		curr = realloc(curr, buflen);
+		if (!curr)
+			die_errno("Cannot allocate buffer for stats counters");
+	}
+
+	if (item_size > sizeof(*ctr))
+		die("Bad counter item size in RDS_INFO_COUNTERS (got %d, max %ld)\n",
+				item_size, sizeof(*ctr));
+	count = buflen / item_size;
+
+	if (prev == NULL) {
+		/* First call - allocate buffer */
+		prev = calloc(count, sizeof(*ctr));
+		ctr = calloc(count, sizeof(*ctr));
+	}
+
+	for (i = 0; i < count; ++i)
+		memcpy(ctr + i, curr + i * item_size, item_size);
+
+	gettimeofday(&now, NULL);
+
+	if (initialize) {
+		for (i = 0; i < count; ++i) {
+			printf(",%s", ctr[i].name);
+			if (strstr((char *) ctr[i].name, "_bytes"))
+				printf(":bytes");
+			else
+				printf(":count");
+		}
+	} else {
+		double scale;
+
+		scale = 1e6 / usec_sub(&now, &last_ts);
+		for (i = 0; i < count; ++i) {
+			printf(",%f",
+				(ctr[i].value - prev[i].value) * scale);
+		}
+	}
+
+	memcpy(prev, ctr, count * sizeof(*ctr));
+	last_ts = now;
+
+	get_stats(initialize);
+}
+
 static int reap_one_child(int wflags)
 {
 	pid_t pid;
@@ -1578,11 +1736,33 @@ static void release_children_and_wait(struct options *opts,
 	nr_running = opts->nr_tasks;
 	memset(summary, 0, sizeof(summary));
 
-	printf("%4s %6s %10s %10s %7s %8s %5s\n",
-		"tsks", "tx/s", "tx+rx K/s", "rw+rr K/s", "tx us/c", "rtt us", "cpu %");
-
 	if (opts->rtprio)
 		set_rt_priority();
+
+	/* Prime the perf data counters and display the CSV header line
+	 * You can filter the CSV data from the rds-stress output by
+	 * grepping for the "::" marker.
+	 */
+	if (opt.show_perfdata) {
+		printf("::");
+		printf("nr_tasks:count"
+		       ",req_size:bytes"
+		       ",ack_size:bytes"
+		       ",rdma_size:bytes");
+
+		printf(",req_sent:count"
+		       ",thruput:kB/s"
+		       ",thruput_rdma:kB/s"
+		       ",tx_delay:microseconds"
+		       ",rtt:microseconds"
+		       ",cpu:percent");
+		get_perfdata(1);
+		printf("\n");
+	} else {
+		printf("%4s %6s %10s %10s %7s %8s %5s\n",
+			"tsks", "tx/s", "tx+rx K/s", "rw+rr K/s",
+			"tx us/c", "rtt us", "cpu %");
+	}
 
 	last_ts = first_ts;
 	while (nr_running) {
@@ -1605,14 +1785,33 @@ static void release_children_and_wait(struct options *opts,
 			 */
 			scale = 1e6 / usec_sub(&now, &last_ts);
 
-			printf("%4u %6"PRIu64" %10.2f %10.2f %7.2f %8.2f %5.2f\n",
-				nr_running,
-				disp[S_REQ_TX_BYTES].nr,
-				scale * throughput(disp) / 1024.0,
-				scale * throughput_rdma(disp) / 1024.0,
-				scale * avg(&disp[S_SENDMSG_USECS]),
-				scale * avg(&disp[S_RTT_USECS]),
-				scale * cpu);
+			if (!opt.show_perfdata) {
+				printf("%4u %6"PRIu64" %10.2f %10.2f %7.2f %8.2f %5.2f\n",
+					nr_running,
+					disp[S_REQ_TX_BYTES].nr,
+					scale * throughput(disp) / 1024.0,
+					scale * throughput_rdma(disp) / 1024.0,
+					scale * avg(&disp[S_SENDMSG_USECS]),
+					scale * avg(&disp[S_RTT_USECS]),
+					scale * cpu);
+			} else {
+				printf("::");
+				printf("%u,%u,%u,%u,",
+				       opts->nr_tasks, opts->req_size,
+				       opts->ack_size, opts->rdma_size);
+
+				printf("%Lu,%f,%f,%f,%f,%f",
+					(unsigned long long) disp[S_REQ_TX_BYTES].nr,
+					scale * throughput(disp) / 1024.0,
+					scale * throughput_rdma(disp) / 1024.0,
+					scale * avg(&disp[S_SENDMSG_USECS]),
+					scale * avg(&disp[S_RTT_USECS]),
+					cpu >= 0? scale * cpu : 0);
+
+				/* Print RDS perf counters etc */
+				get_perfdata(0);
+				printf("\n");
+			}
 		}
 
 		stat_accumulate(summary, disp);
@@ -1943,6 +2142,7 @@ enum {
 	OPT_SHOW_PARAMS,
 	OPT_CONNECT_RETRIES,
 	OPT_USE_CONG_MONITOR,
+	OPT_PERFDATA,
 };
 
 static struct option long_options[] = {
@@ -1966,6 +2166,7 @@ static struct option long_options[] = {
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
 { "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
+{ "show-perfdata",	no_argument,		NULL,	OPT_PERFDATA },
 { "connect-retries",	required_argument,	NULL,	OPT_CONNECT_RETRIES },
 { "use-cong-monitor",	required_argument,	NULL,	OPT_USE_CONG_MONITOR },
 
@@ -2011,6 +2212,7 @@ int main(int argc, char **argv)
 	opts.rdma_alignment = 0;
 	opts.show_params = 0;
 	opts.connect_retries = 0;
+	opts.show_perfdata = 0;
 
         while(1) {
 		int c, index;
@@ -2085,6 +2287,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_CONNECT_RETRIES:
 				opts.connect_retries = parse_ull(optarg, (uint32_t)~0);
+				break;
+			case OPT_PERFDATA:
+				opts.show_perfdata = 1;
 				break;
                         case 'h':
                         case '?':

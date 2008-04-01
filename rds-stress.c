@@ -60,6 +60,7 @@ struct options {
 	uint8_t		use_cong_monitor;
 	uint8_t		rdma_use_once;
 	uint8_t		rdma_use_get_mr;
+	uint8_t		rdma_use_fence;
 	uint8_t		rdma_cache_mrs;
 	unsigned int	rdma_alignment;
 	unsigned int	connect_retries;
@@ -841,8 +842,9 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 		break;
 	}
 
-	/* Always fence off subsequent SENDs */
-	args.flags |= RDS_RDMA_FENCE;
+	/* Fence off subsequent SENDs - this is the default */
+	if (opt.rdma_use_fence)
+		args.flags |= RDS_RDMA_FENCE;
 
 	args.flags |= RDS_RDMA_NOTIFY_ME;
 	args.user_token = user_token;
@@ -1947,6 +1949,9 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 		if (opts->rdma_use_get_mr) {
 			printf(" use_get_mr"); ++k;
 		}
+		if (opts->rdma_use_fence) {
+			printf(" use_fence"); ++k;
+		}
 		if (opts->rdma_cache_mrs) {
 			printf(" cache_mrs"); ++k;
 		}
@@ -2142,6 +2147,7 @@ void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 enum {
 	OPT_RDMA_USE_ONCE = 0x100,
 	OPT_RDMA_USE_GET_MR,
+	OPT_RDMA_USE_FENCE,
 	OPT_RDMA_USE_NOTIFY,
 	OPT_RDMA_CACHE_MRS,
 	OPT_RDMA_ALIGNMENT,
@@ -2169,6 +2175,7 @@ static struct option long_options[] = {
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
+{ "rdma-use-fence",	required_argument,	NULL,	OPT_RDMA_USE_FENCE },
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-cache-mrs",	required_argument,	NULL,	OPT_RDMA_CACHE_MRS },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
@@ -2215,6 +2222,7 @@ int main(int argc, char **argv)
 	opts.verify = 0;
 	opts.rdma_size = 0;
 	opts.use_cong_monitor = 1;
+	opts.rdma_use_fence = 1;
 	opts.rdma_cache_mrs = 0;
 	opts.rdma_alignment = 0;
 	opts.show_params = 0;
@@ -2283,6 +2291,9 @@ int main(int argc, char **argv)
 			case OPT_RDMA_USE_GET_MR:
 				opts.rdma_use_get_mr = parse_ull(optarg, 1);
 				break;
+			case OPT_RDMA_USE_FENCE:
+				opts.rdma_use_fence = parse_ull(optarg, 1);
+				break;
 			case OPT_RDMA_CACHE_MRS:
 				opts.rdma_cache_mrs = parse_ull(optarg, 1);
 				break;
@@ -2345,7 +2356,7 @@ int main(int argc, char **argv)
 	 * this is just to simplify debugging, but eventually we
 	 * need to support rdma sizes from 1 to 1meg byte
 	 */
-	if (opts.rdma_size)
+	if (opts.rdma_size && 0)
 		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
 
 	opt = opts;

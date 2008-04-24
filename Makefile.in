@@ -24,7 +24,7 @@ else
 COMMON_OBJECTS = $(subst .c,.o,$(filter-out pfhack.c,$(COMMON_SOURCES)))
 endif
 
-PROGRAMS = rds-gen rds-sink rds-info rds-stress
+PROGRAMS = rds-gen rds-sink rds-info rds-stress rds-ping
 
 all-programs: $(PROGRAMS)
 
@@ -65,6 +65,7 @@ EXTRA_DIST := 	rds-info.1 \
 		rds-gen.1 \
 		rds-sink.1 \
 		rds-stress.1 \
+		rds-ping.1 \
 		rds.7 \
 		rds-rdma.7 \
 		Makefile.in \

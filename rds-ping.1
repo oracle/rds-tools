@@ -1,0 +1,69 @@
+.Dd Apr 22, 2008
+.Dt RDS-PING 1
+.Os
+.Sh NAME
+.Nm rds-ping
+.Nd test reachability of remote node over RDS
+.Pp
+.Sh SYNOPSIS
+.Nm rds-ping
+.Bk -words
+.Op Fl c Ar count
+.Op Fl i Ar interval
+.Op Fl I Ar local_addr
+.Ar remote_addr
+
+.Sh DESCRIPTION
+.Nm rds-ping
+is used to test whether a remote node is reachable over RDS.
+Its interface is designed to operate pretty much the standard
+.Xr ping 8
+utility, even though the way it works is pretty different.
+.Pp
+.Nm rds-ping
+opens several RDS sockets and sends packets to port 0 on
+the indicated host. This is a special port number to which
+no socket is bound; instead, the kernel processes incoming
+packets and responds to them.
+.Sh OPTIONS
+The following options are available for use on the command line:
+.Bl -tag -width Ds
+.It Fl c Ar count
+Causes
+.Nm rds-ping
+to exit after sending (and receiving) the specified number of
+packets.
+.It Fl I Ar address
+By default,
+.Nm rds-ping
+will pick the local source address for the RDS socket based
+on routing information for the destination address (i.e. if
+packets to the given destination would be routed through interface
+.Nm ib0 ,
+then it will use the IP address of
+.Nm ib0
+as source address).
+Using the
+.Fl I
+option, you can override this choice.
+.It Fl i Ar timeout
+By default,
+.Nm rds-ping
+will wait for one second between sending packets. Use this option
+to specified a different interval. The timeout value is given in
+seconds, and can be a floating point number. Optionally, append
+.Nm msec
+or
+.Nm usec
+to specify a timeout in milliseconds or microseconds, respectively.
+.It
+Specifying a timeout considerably smaller than the packet round-trip
+time will produce unexpected results.
+.El
+.Sh AUTHORS
+.Nm rds-ping
+was written by Olaf Kirch <olaf.kirch@oracle.com>.
+.Sh SEE ALSO
+.Xr rds 7 ,
+.Xr rds-info 1 ,
+.Xr rds-stress 1 .

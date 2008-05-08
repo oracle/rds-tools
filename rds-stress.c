@@ -1977,9 +1977,9 @@ static void encode_options(struct options *dst, const struct options *src)
 	dst->req_size = htonl(src->req_size);
 	dst->ack_size = htonl(src->ack_size);
 	dst->rdma_size = htonl(src->rdma_size);
-	dst->send_addr = src->send_addr;		/* network byte order */
-	dst->receive_addr = src->receive_addr;		/* network byte order */
-	dst->starting_port = src->starting_port;	/* network byte order */
+	dst->send_addr = htonl(src->send_addr);		/* host byte order */
+	dst->receive_addr = htonl(src->receive_addr);	/* host byte order */
+	dst->starting_port = htons(src->starting_port);	/* host byte order */
 	dst->nr_tasks = htons(src->nr_tasks);
 	dst->run_time = htonl(src->run_time);
 	dst->summary_only = src->summary_only;		/* byte sized */
@@ -2006,9 +2006,9 @@ static void decode_options(struct options *dst, const struct options *src)
 	dst->req_size = ntohl(src->req_size);
 	dst->ack_size = ntohl(src->ack_size);
 	dst->rdma_size = ntohl(src->rdma_size);
-	dst->send_addr = src->send_addr;		/* network byte order */
-	dst->receive_addr = src->receive_addr;		/* network byte order */
-	dst->starting_port = src->starting_port;	/* network byte order */
+	dst->send_addr = ntohl(src->send_addr);		/* host byte order */
+	dst->receive_addr = ntohl(src->receive_addr);	/* host byte order */
+	dst->starting_port = ntohs(src->starting_port);	/* host byte order */
 	dst->nr_tasks = ntohs(src->nr_tasks);
 	dst->run_time = ntohl(src->run_time);
 	dst->summary_only = src->summary_only;		/* byte sized */

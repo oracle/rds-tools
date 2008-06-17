@@ -7,6 +7,7 @@
 .Pp
 .Sh SYNOPSIS
 .Nm rds-info
+.Op Fl v
 .Bk -words
 .Op Fl cknrstIT
 
@@ -21,6 +22,10 @@ only the information associated with those options is displayed.
 
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl v
+Requests verbose output. When this option is given, some classes of information
+will display additional data.
+
 .It Fl c
 Display global counters.  Each counter increments as its event
 occurs.  The counters may not be reset.  The set of supported counters

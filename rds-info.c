@@ -67,6 +67,8 @@
 	for (;len > 0 && copy_into(var, data, each);	\
 	     data += each, len -= min(len, each))
 
+static int	opt_verbose = 0;
+
 /* Like inet_ntoa, but can be re-entered several times without clobbering
  * the previously returned string. */
 static const char *paddr(int af, const void *addrp)
@@ -245,7 +247,7 @@ void print_version()
 
 int main(int argc, char **argv)
 {
-	char optstring[258] = "+";
+	char optstring[258] = "v+";
 	int given_options = 0;
 	socklen_t len = 0;
 	void *data = NULL;
@@ -266,6 +268,12 @@ int main(int argc, char **argv)
 	}
 
 	while ((c = getopt(argc, argv, optstring)) != EOF) {
+		switch (c) {
+		case 'v':
+			opt_verbose++;
+			continue;
+		}
+
 		if (c >= array_size(infos) || !infos[c].opt_val) {
 			verbosef(0, stderr, "%s: Invalid option \'-%c\'\n",
 				 progname, optopt);

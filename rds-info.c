@@ -177,6 +177,22 @@ static void print_tcp_socks(void *data, int each, socklen_t len, void *extra)
 	}
 }
 
+static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
+{
+	struct rds_info_ib_connection ic;
+
+	printf("\nRDS IB Connections:\n%15s %15s %32s %32s\n",
+		"LocalAddr", "RemoteAddr", "LocalDev", "RemoteDev");
+
+	for_each(ic, data, each, len) {
+		printf("%15s %15s %32s %32s\n",
+			ipv4addr(ic.src_addr),
+			ipv4addr(ic.dst_addr),
+			ipv6addr(ic.src_gid),
+			ipv6addr(ic.dst_gid));
+	}
+}
+
 struct info {
 	int opt_val;
 	char *description;
@@ -200,6 +216,8 @@ struct info infos[] = {
 		  print_msgs, "Retransmit", 0 },
 	['T'] = { RDS_INFO_TCP_SOCKETS, "TCP transport sockets",
 		  print_tcp_socks, NULL, 0 },
+	['I'] = { RDS_INFO_IB_CONNECTIONS, "IB transport connections",
+		  print_ib_conns, NULL, 0 },
 };
 
 void print_usage(int rc)

@@ -90,6 +90,7 @@
 #define RDS_INFO_RECV_MESSAGES          10005
 #define RDS_INFO_SOCKETS                10006
 #define RDS_INFO_TCP_SOCKETS            10007
+#define RDS_INFO_IB_CONNECTIONS		10008
 
 struct rds_info_counter {
 	u_int8_t	name[32];
@@ -150,6 +151,14 @@ struct rds_info_tcp_socket {
 	u_int32_t	last_expected_una;
 	u_int32_t	last_seen_una;
 } __attribute__((packed));
+
+#define RDS_IB_GID_LEN	16
+struct rds_info_ib_connection {
+	__be32		src_addr;
+	__be32		dst_addr;
+	uint8_t		src_gid[RDS_IB_GID_LEN];
+	uint8_t		dst_gid[RDS_IB_GID_LEN];
+};
 
 /*
  * Congestion monitoring.

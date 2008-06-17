@@ -8,7 +8,7 @@
 .Sh SYNOPSIS
 .Nm rds-info
 .Bk -words
-.Op Fl cknrstT
+.Op Fl cknrstIT
 
 .Sh DESCRIPTION
 The
@@ -101,6 +101,21 @@ The number of bytes in the message payload.
 
 The following information sources are dependent on specific transports which
 may not always be available. 
+
+.It Fl I
+Display the IB connections which the IB transport is using to provide
+RDS connections.
+
+.Bl -tag -width 4
+.It LocalAddr
+The local IP address of this connection.
+.It RemoteAddr
+The remote IP address of this connection.
+.It LocalDev
+The local IB Global Identifier, printed in IPv6 address syntax.
+.It RemoteDev
+The remote IB Global Identifier, printed in IPv6 address syntax.
+.El
 
 .It Fl T
 Display the TCP sockets which the TCP transport is using to provide

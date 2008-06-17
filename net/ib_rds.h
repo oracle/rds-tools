@@ -158,6 +158,12 @@ struct rds_info_ib_connection {
 	__be32		dst_addr;
 	uint8_t		src_gid[RDS_IB_GID_LEN];
 	uint8_t		dst_gid[RDS_IB_GID_LEN];
+
+	uint32_t	max_send_wr;
+	uint32_t	max_recv_wr;
+	uint32_t	max_send_sge;
+	uint32_t	rdma_fmr_max;
+	uint32_t	rdma_fmr_size;
 };
 
 /*

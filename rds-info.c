@@ -187,11 +187,21 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
 		"LocalAddr", "RemoteAddr", "LocalDev", "RemoteDev");
 
 	for_each(ic, data, each, len) {
-		printf("%15s %15s %32s %32s\n",
+		printf("%15s %15s %32s %32s",
 			ipv4addr(ic.src_addr),
 			ipv4addr(ic.dst_addr),
 			ipv6addr(ic.src_gid),
 			ipv6addr(ic.dst_gid));
+
+		if (opt_verbose) {
+			printf("  send_wr=%u", ic.max_send_wr);
+			printf(", recv_wr=%u", ic.max_recv_wr);
+			printf(", send_sge=%u", ic.max_send_sge);
+			printf(", rdma_fmr_max=%u", ic.rdma_fmr_max);
+			printf(", rdma_fmr_size=%u", ic.rdma_fmr_size);
+		}
+
+		printf("\n");
 	}
 }
 

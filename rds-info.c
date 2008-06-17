@@ -67,6 +67,31 @@
 	for (;len > 0 && copy_into(var, data, each);	\
 	     data += each, len -= min(len, each))
 
+/* Like inet_ntoa, but can be re-entered several times without clobbering
+ * the previously returned string. */
+static const char *paddr(int af, const void *addrp)
+{
+	static char nbuf[8][INET6_ADDRSTRLEN];
+	static int which = 0;
+	char *string;
+
+	string = nbuf[which];
+	which = (which + 1) % 8;
+
+	inet_ntop(af, addrp, string, INET6_ADDRSTRLEN);
+	return string;
+}
+
+static const char *ipv4addr(uint32_t addr)
+{
+	return paddr(AF_INET, &addr);
+}
+
+static const char *ipv6addr(const void *addr)
+{
+	return paddr(AF_INET6, addr);
+}
+
 static void print_counters(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_counter ctr;
@@ -80,19 +105,17 @@ static void print_counters(void *data, int each, socklen_t len, void *extra)
 static void print_sockets(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_socket sk;
-	struct in_addr addr;
 
 	printf("\nRDS Sockets:\n%15s %5s %15s %5s %10s %10s\n",
 		"BoundAddr", "BPort", "ConnAddr", "CPort", "SndBuf",
 		"RcvBuf");
 	
 	for_each(sk, data, each, len) {
-		addr.s_addr = sk.bound_addr;
-		printf("%15s %5u ", inet_ntoa(addr),
-		       ntohs(sk.bound_port));
-		addr.s_addr = sk.connected_addr;
-		printf("%15s %5u %10u %10u\n",
-			inet_ntoa(addr), ntohs(sk.connected_port),
+		printf("%15s %5u %15s %5u %10u %10u\n",
+			ipv4addr(sk.bound_addr),
+			ntohs(sk.bound_port),
+			ipv4addr(sk.connected_addr),
+			ntohs(sk.connected_port),
 			sk.sndbuf, sk.rcvbuf);
 	}
 }
@@ -100,47 +123,43 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra)
 static void print_conns(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_connection conn;
-	struct in_addr addr;
 
 	printf("\nRDS Connections:\n%15s %15s %16s %16s %3s\n",
 		"LocalAddr", "RemoteAddr", "NextTX", "NextRX", "Flg");
 	
 	for_each(conn, data, each, len) {
-		addr.s_addr = conn.laddr;
-		printf("%15s ", inet_ntoa(addr));
-		addr.s_addr = conn.faddr;
-		printf("%15s %16"PRIu64" %16"PRIu64" ",
-			inet_ntoa(addr), conn.next_tx_seq,
-			conn.next_rx_seq);
-		printf("%c%c%c\n",
-		      rds_conn_flag(conn, SENDING, 's'),
-		      rds_conn_flag(conn, CONNECTING, 'c'),
-		      rds_conn_flag(conn, CONNECTED, 'C'));
+		printf("%15s %15s %16"PRIu64" %16"PRIu64" %c%c%c\n",
+			ipv4addr(conn.laddr),
+			ipv4addr(conn.faddr),
+			conn.next_tx_seq,
+			conn.next_rx_seq,
+			rds_conn_flag(conn, SENDING, 's'),
+			rds_conn_flag(conn, CONNECTING, 'c'),
+			rds_conn_flag(conn, CONNECTED, 'C'));
 	}
 }
 
 static void print_msgs(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_message msg;
-	struct in_addr addr;
 
 	printf("\n%s Message Queue:\n%15s %5s %15s %5s %16s %10s\n",
 		(char *)extra,
 		"LocalAddr", "LPort", "RemoteAddr", "RPort", "Seq", "Bytes");
 	
 	for_each(msg, data, each, len) {
-		addr.s_addr = msg.laddr;
-		printf("%15s %5u ", inet_ntoa(addr), ntohs(msg.lport));
-		addr.s_addr = msg.faddr;
-		printf("%15s %5u %16"PRIu64" %10u\n",
-			inet_ntoa(addr), ntohs(msg.fport), msg.seq, msg.len);
+		printf("%15s %5u %15s %5u %16"PRIu64" %10u\n",
+			ipv4addr(msg.laddr),
+			ntohs(msg.lport),
+			ipv4addr(msg.faddr),
+			ntohs(msg.fport),
+			msg.seq, msg.len);
 	}
 }
 
 static void print_tcp_socks(void *data, int each, socklen_t len, void *extra)
 {		
 	struct rds_info_tcp_socket ts;
-	struct in_addr addr;
 
 	printf("\nTCP Connections:\n"
 		"%15s %5s %15s %5s %10s %10s %10s %10s %10s\n",
@@ -148,12 +167,11 @@ static void print_tcp_socks(void *data, int each, socklen_t len, void *extra)
 		"HdrRemain", "DataRemain", "SentNxt", "ExpectUna", "SeenUna");
 	
 	for_each(ts, data, each, len) {
-		addr.s_addr = ts.local_addr;
-		printf("%15s %5u ", inet_ntoa(addr),
-			ntohs(ts.local_port));
-		addr.s_addr = ts.local_addr;
-		printf("%15s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
-			inet_ntoa(addr), ntohs(ts.peer_port),
+		printf("%15s %5u %15s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
+			ipv4addr(ts.local_addr),
+			ntohs(ts.local_port),
+			ipv4addr(ts.peer_addr),
+			ntohs(ts.peer_port),
 			ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
 			ts.last_expected_una, ts.last_seen_una);
 	}

@@ -56,6 +56,10 @@ that the socket has not been connected.
 .It SndBuf, RcvBuf
 The number of bytes of message payload which can be queued for sending or
 receiving on the socket, respectively.
+.It Inode
+The number of the inode object associated with the socket. Can be used to
+locate the process owning a given socket by searching /proc/*/fd for
+open files referencing a socket with this inode number.
 .El
 
 .It Fl n

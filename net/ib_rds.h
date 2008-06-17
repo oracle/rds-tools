@@ -138,6 +138,16 @@ struct rds_info_socket {
 	__be16		bound_port;
 	__be16		connected_port;
 	u_int32_t	rcvbuf;
+	uint64_t	inum;
+} __attribute__((packed));
+
+struct rds_info_socket_v1 {
+	u_int32_t	sndbuf;
+	__be32		bound_addr;
+	__be32		connected_addr;
+	__be16		bound_port;
+	__be16		connected_port;
+	u_int32_t	rcvbuf;
 } __attribute__((packed));
 
 struct rds_info_tcp_socket {

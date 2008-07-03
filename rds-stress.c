@@ -494,6 +494,15 @@ static int bound_socket(int domain, int type, int protocol,
 	return fd;
 }
 
+static uint32_t get_local_address(int fd, struct sockaddr_in *sin)
+{
+	socklen_t alen = sizeof(*sin);
+
+	if (getsockname(fd, (struct sockaddr *) sin, &alen))
+		die_errno("getsockname failed");
+	return ntohl(sin->sin_addr.s_addr);
+}
+
 static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 {
 	int bytes;
@@ -546,6 +555,12 @@ static int check_rdma_support(struct options *opts)
 	struct sockaddr_in sin;
 	struct rds_free_mr_args args;
 	int fd, okay = 0;
+
+	/* We need a local address to bind to. If the user
+	 * didn't specify the -r option, we tell him to go on for
+	 * now - he'll call back once more later. */
+	if (opts->receive_addr == 0)
+		return 1;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port);
@@ -2127,6 +2142,12 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 
 	peer_connect(fd, &sin);
 
+	if (opts->receive_addr == 0) {
+		opts->receive_addr = get_local_address(fd, &sin);
+		if (opts->rdma_size && !check_rdma_support(opts))
+			die("RDMA not supported by this kernel\n");
+	}
+
 	/* "negotiation" is overstating things a bit :-)
 	 * We just tell the peer what options to use.
 	 */
@@ -2178,8 +2199,14 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	 * anyway. */
 	close(lfd);
 
-	printf("accepted connection from %s:%u\n", inet_ntoa(sin.sin_addr),
+	printf("accepted connection from %s:%u", inet_ntoa(sin.sin_addr),
 		ntohs(sin.sin_port));
+	if (addr == 0) {
+		/* Get our receive address - i.e. the address the peer connected to. */
+		addr = get_local_address(control_fd, &sin);
+		printf(" on %s:%u", inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
+	}
+	printf("\n");
 
 	peer_recv(fd, &remote, sizeof(struct options));
 	decode_options(&remote, &remote);
@@ -2365,6 +2392,7 @@ int main(int argc, char **argv)
 	if (argc == 1)
 		usage();
 
+	opts.receive_addr = 0;
 	opts.ack_size = MIN_MSG_BYTES;
 	opts.req_size = 1024;
 	opts.run_time = 0;
@@ -2474,8 +2502,6 @@ int main(int argc, char **argv)
 
 	if (opts.starting_port == (uint16_t)~0)
 		die("specify starting port with -p\n");
-	if (opts.receive_addr == ~0)
-		die("specify receiving addr with -r\n");
 
 	if (opts.rdma_use_once == 0xff)
 		opts.rdma_use_once = !opts.rdma_cache_mrs;

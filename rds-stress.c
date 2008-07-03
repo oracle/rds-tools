@@ -1133,32 +1133,40 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 	return ret;
 }
 
+static int ack_anything(int fd, struct task *t,
+			struct options *opts,
+			struct child_control *ctl,
+			int can_send)
+{
+	while (t->unacked) {
+		uint16_t qindex;
+
+		qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
+		if (!can_send)
+			goto eagain;
+		if (send_ack(fd, t, qindex, opts, ctl) < 0)
+			return -1;
+		t->unacked -= 1;
+	}
+	return 0;
+
+eagain:
+	errno = EAGAIN;
+	return -1;
+}
+
 static int send_anything(int fd, struct task *t,
 			struct options *opts,
 			struct child_control *ctl,
 			int can_send)
 {
-	int ret;
-
-	while (t->unacked || t->pending < opts->req_depth) {
-		if (t->unacked) {
-			uint16_t qindex;
-
-			qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
-			if (!can_send)
-				goto eagain;
-			ret = send_ack(fd, t, qindex, opts, ctl);
-			if (ret < 0)
-				return -1;
-			t->unacked -= 1;
-		}
-		if (t->pending < opts->req_depth) {
-			if (!can_send)
-				goto eagain;
-			ret = send_one(fd, t, opts, ctl);
-			if (ret < 0)
-				return -1;
-		}
+	if (ack_anything(fd, t, opts, ctl, can_send) < 0)
+		return -1;
+	while (t->pending < opts->req_depth) {
+		if (!can_send)
+			goto eagain;
+		if (send_one(fd, t, opts, ctl) < 0)
+			return -1;
 	}
 
 	return 0;

@@ -70,6 +70,7 @@ struct options {
 } __attribute__((packed));
 
 static struct options	opt;
+static int		control_fd;
 
 struct counter {
 	uint64_t	nr;
@@ -1457,6 +1458,10 @@ static struct child_control *start_children(struct options *opts)
 			die_errno("forking child nr %u failed", i);
 		if (pid == 0) {
 			opts->suppress_warnings = (i > 0);
+			if (control_fd >= 0) {
+				close(control_fd);
+				control_fd = -1;
+			}
 			run_child(parent, ctl + i, opts, i);
 			exit(0);
 		}
@@ -1752,7 +1757,8 @@ static int reap_one_child(int wflags)
 
 static void release_children_and_wait(struct options *opts,
 				      struct child_control *ctl,
-				      struct soak_control *soak_arr)
+				      struct soak_control *soak_arr,
+				      int active)
 {
 	struct counter disp[NR_STATS];
 	struct counter summary[NR_STATS];
@@ -1780,7 +1786,7 @@ static void release_children_and_wait(struct options *opts,
 	printf("\n");
 
 	gettimeofday(&first_ts, NULL);
-	if (opts->run_time) {
+	if (opts->run_time && active) {
 		end = first_ts;
 		end.tv_sec += opts->run_time;
 	} else {
@@ -1822,7 +1828,16 @@ static void release_children_and_wait(struct options *opts,
 	while (nr_running) {
 		double cpu;
 
-		sleep(1);
+		if (active) {
+			sleep(1);
+		} else {
+			struct pollfd pfd;
+
+			pfd.fd = control_fd;
+			pfd.events = POLLIN|POLLHUP;
+			if (poll(&pfd, 1, 1000) == 1)
+				break;
+		}
 
 		/* XXX big bug, need to mark some ctl elements dead */
 		stat_snapshot(disp, ctl, nr_running);
@@ -1873,14 +1888,8 @@ static void release_children_and_wait(struct options *opts,
 		cpu_samples++;
 		last_ts = now;
 
-		if (timerisset(&end)) {
-			if (timercmp(&now, &end, >=)) {
-				for (i = 0; i < opts->nr_tasks; i++)
-					kill(ctl[i].pid, SIGTERM);
-				stop_soakers(soak_arr);
-				break;
-			}
-		}
+		if (timerisset(&end) && timercmp(&now, &end, >=))
+			break;
 
 		/* see if any children have finished or died.
 		 * This is a bit touchy - we should really be
@@ -1888,6 +1897,15 @@ static void release_children_and_wait(struct options *opts,
 		 * RDS child. */
 		if (reap_one_child(WNOHANG))
 			nr_running--;
+	}
+
+	close(control_fd);
+	control_fd = -1;
+
+	if (nr_running) {
+		for (i = 0; i < opts->nr_tasks; i++)
+			kill(ctl[i].pid, SIGTERM);
+		stop_soakers(soak_arr);
 	}
 
 	while (nr_running && reap_one_child(0))
@@ -2101,6 +2119,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
 
 	fd = bound_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sin);
+	control_fd = fd;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port);
@@ -2124,10 +2143,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	peer_send(fd, &ok, sizeof(ok));
 	peer_recv(fd, &ok, sizeof(ok));
 
-	/* Close socket now, to prevent long TIME_WAIT delays */
-	close(fd);
-
-	release_children_and_wait(opts, ctl, soak_arr);
+	release_children_and_wait(opts, ctl, soak_arr, 1);
 
 	return 0;
 }
@@ -2156,6 +2172,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	fd = accept(lfd, (struct sockaddr *)&sin, &socklen);
 	if (fd < 0)
 		die_errno("accept() failed");
+	control_fd = fd;
 
 	/* Do not accept any further connections - we don't handle them
 	 * anyway. */
@@ -2183,7 +2200,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	peer_send(fd, &ok, sizeof(ok));
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
-	release_children_and_wait(opts, ctl, soak_arr);
+	release_children_and_wait(opts, ctl, soak_arr, 0);
 
 	return 0;
 }

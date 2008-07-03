@@ -27,16 +27,16 @@ sends messages between groups tasks, usually running on seperate
 machines.
 .Pp
 First a passive receiving instance is started.  It only needs to be told
-what address and port to listen on.
+what port to listen on.
 .Pp
-.Dl $ rds-stress -r recvhost -p 4000
+.Dl $ rds-stress -p 4000
 .Pp
-Then an active sending instance is started.  It is told what address and port
-to send from as well as the address and port at which it will find a listening
+Then an active sending instance is started, giving it
+the address and port at which it will find a listening
 passive receiver.  In addition, it is given configuration options which
 both instances will use.
 .Pp
-.Dl $ rds-stress -r sendhost -s recvhost -p 4000 -t 1 -d 1
+.Dl $ rds-stress -s recvhost -p 4000 -t 1 -d 1
 .Pp
 The active sender will parse the options, connect to the passive receiver, and
 send the options over this connection.  From this point on both instances
@@ -73,13 +73,19 @@ Each parent binds a TCP socket to this port number and their respective
 address.  They will trade the negotiated options over this socket.  Each
 child will bind an RDS socket to the range of ports immediately following
 this port number, for as many children as there are.
-.It Fl r Ar receive_address
-This specifies the address that messages will be sent from.  If -s is not 
-specified than rds-stress waits for a connection on this address before
-proceeding.
 .It Fl s Ar send_address
 A connection attempt is made to this address.  Once its complete and the
 options are sent over it then children will be created and work will proceed.
+.It Fl r Ar receive_address
+This specifies the address that messages will be sent from.  If -s is not
+specified then rds-stress waits for a connection on this address before
+proceeding.
+.Pp
+If this option is not given, rds-stress will choose an appropriate address.
+The passive process will accept connections on all local interfaces, and
+obtain the address once the control connection is established.
+The active process will choose a local address based on the interface through
+which it connects to the destination address.
 .It Fl a Ar ack_bytes
 This specifies the size of the ack messages, in bytes. There is a minimum size
 which depends on the format of the ack messages, which may change over time.

@@ -2156,6 +2156,8 @@ static void peer_recv(int fd, void *ptr, size_t size)
 		ret = read(fd, ptr, size);
 		if (ret < 0)
 			die_errno("Cannot recv from peer");
+		if (ret == 0)
+			die("Peer unexpectedly closed connection\n");
 		size -= ret;
 		ptr += ret;
 	}

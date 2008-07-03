@@ -63,6 +63,7 @@ struct options {
 	uint8_t		rdma_use_get_mr;
 	uint8_t		rdma_use_fence;
 	uint8_t		rdma_cache_mrs;
+	uint8_t		rdma_key_o_meter;
 	uint8_t		suppress_warnings;
 
 	uint32_t	rdma_alignment;
@@ -459,7 +460,7 @@ void stat_inc(struct counter *ctr, uint64_t val)
 	ctr->max = max(val, ctr->max);
 }
 
-int64_t tv_cmp(struct timeval *a, struct timeval *b)
+int64_t tv_cmp(const struct timeval *a, const struct timeval *b)
 {
 	int64_t a_usecs = ((uint64_t)a->tv_sec * 1000000ULL) + a->tv_usec;
 	int64_t b_usecs = ((uint64_t)b->tv_sec * 1000000ULL) + b->tv_usec;
@@ -621,6 +622,139 @@ static void free_rdma_key(int fd, uint64_t key)
 	mrs_allocated--;
 }
 
+/*
+ * RDMA key-o-meter. We track how frequently the kernel
+ * re-issues R_Keys
+ *
+ * The key_o_meter data structures are shared between the processes
+ * without any locking. We don't care much for locking here...
+ */
+#define RDMA_MAX_TRACKED_KEYS	(32*1024)
+struct rdma_key_stamp {
+	uint32_t	r_key;
+	struct timeval	issued;
+};
+struct rdma_key_trace {
+	uint32_t	count, max;
+	struct rdma_key_stamp *entry;
+};
+struct rdma_key_o_meter {
+	struct rdma_key_trace *current;
+	struct rdma_key_trace *idle;
+};
+static struct rdma_key_o_meter *rdma_key_o_meter;
+static unsigned int rdma_key_task;
+
+static void rdma_key_o_meter_init(unsigned int nr_tasks)
+{
+	struct rdma_key_trace *kt;
+	struct rdma_key_stamp *ks;
+	uint32_t max;
+	unsigned int i, size;
+	void *base;
+
+	size = sizeof(struct rdma_key_o_meter)
+			+ 2 * nr_tasks * sizeof(*kt)
+			+ 2 * RDMA_MAX_TRACKED_KEYS * sizeof(*ks);
+	base = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_SHARED, 0, 0);
+	if (base == MAP_FAILED)
+		die_errno("alloc_rdma_buffers: mmap failed");
+
+	rdma_key_o_meter = (struct rdma_key_o_meter *) base;
+	base = rdma_key_o_meter + 1;
+
+	rdma_key_o_meter->current = (struct rdma_key_trace *) base;
+	base = rdma_key_o_meter->current + nr_tasks;
+
+	rdma_key_o_meter->idle = (struct rdma_key_trace *) base;
+	base = rdma_key_o_meter->idle + nr_tasks;
+
+	ks = (struct rdma_key_stamp *) base;
+	max = RDMA_MAX_TRACKED_KEYS / nr_tasks;
+	for (i = 0, kt = rdma_key_o_meter->current; i < 2 * nr_tasks; ++i, ++kt) {
+		kt->count = 0;
+		kt->max = max;
+		kt->entry = ks + i * max;
+	}
+}
+
+/* This is called in the child process to set the index of
+ * the key-o-meter to use */
+static void rdma_key_o_meter_set_self(unsigned int task_idx)
+{
+	rdma_key_task = task_idx;
+}
+
+static void rdma_key_o_meter_add(uint32_t key)
+{
+	struct rdma_key_trace *kt;
+
+	if (!rdma_key_o_meter)
+		return;
+
+	kt = &rdma_key_o_meter->current[rdma_key_task];
+	if (kt->count < kt->max) {
+		kt->entry[kt->count].r_key = key;
+		gettimeofday(&kt->entry[kt->count].issued, NULL);
+		kt->count++;
+	}
+}
+
+static int rdma_key_stamp_compare(const void *p1, const void *p2)
+{
+	const struct rdma_key_stamp *ks1 = p1, *ks2 = p2;
+
+	if (ks1->r_key < ks2->r_key)
+		return -1;
+	if (ks1->r_key > ks2->r_key)
+		return 1;
+	return tv_cmp(&ks1->issued, &ks2->issued);
+}
+
+static void rdma_key_o_meter_check(unsigned int nr_tasks)
+{
+	struct rdma_key_stamp *ks, sorted[RDMA_MAX_TRACKED_KEYS];
+	struct rdma_key_trace *kt;
+	unsigned int i, j, count = 0;
+	unsigned int reissued = 0;
+	double min_elapsed = 0, avg_elapsed = 0;
+
+	if (!rdma_key_o_meter)
+		return;
+
+	/* Extract keys from all tasks and sort them. */
+	kt = rdma_key_o_meter->idle;
+	for (i = 0; i < nr_tasks; ++i, ++kt) {
+		ks = kt->entry;
+
+		for (j = 0; j < kt->count; ++j)
+			sorted[count++] = *ks++;
+		kt->count = 0;
+	}
+	qsort(sorted, count, sizeof(*sorted), rdma_key_stamp_compare);
+
+	/* Now see how many were reissued */
+	ks = sorted;
+	for (i = 0; i + 1 < count; ++i, ++ks) {
+		double elapsed;
+
+		if (ks[0].r_key != ks[1].r_key)
+			continue;
+		elapsed = 1e-6 * usec_sub(&ks[1].issued, &ks[0].issued);
+		if (reissued == 0 || elapsed < min_elapsed)
+			min_elapsed = elapsed;
+		avg_elapsed += elapsed;
+	}
+
+	if (reissued)
+		printf(" *** %u R_Keys were re-issued; min distance=%f sec, avg distance=%f sec\n",
+				reissued, min_elapsed, avg_elapsed / reissued);
+
+	/* Swap current and idle */
+	kt = rdma_key_o_meter->current;
+	rdma_key_o_meter->current = rdma_key_o_meter->idle;
+	rdma_key_o_meter->idle = kt;
+}
 
 static void rds_fill_buffer(void *buf, size_t size, uint64_t pattern)
 {
@@ -923,14 +1057,14 @@ static void rdma_build_cmsg_dest(struct msghdr *msg, rds_rdma_cookie_t rdma_dest
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_DEST, &rdma_dest, sizeof(rdma_dest));
 }
 
-static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size)
+static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size,
+			rds_rdma_cookie_t *cookie)
 {
-	static rds_rdma_cookie_t cookie;
 	struct rds_get_mr_args args;
 
 	args.vec.addr = addr;
 	args.vec.bytes = size;
-	args.cookie_addr = ptr64(&cookie);
+	args.cookie_addr = ptr64(cookie);
 	args.flags = RDS_RDMA_READWRITE; /* for now, always assume r/w */
 	if (opt.rdma_use_once)
 		args.flags |= RDS_RDMA_USE_ONCE;
@@ -994,6 +1128,7 @@ static int send_packet(int fd, struct task *t,
 		struct header *hdr, unsigned int size)
 {
 	unsigned char buf[size], *rdma_flight_recorder = NULL;
+	rds_rdma_cookie_t cookie = 0;
 	struct msghdr msg;
 	struct iovec iov;
 	ssize_t ret;
@@ -1020,12 +1155,13 @@ static int send_packet(int fd, struct task *t,
 		if (hdr->rdma_key != 0) {
 			/* We used GET_MR to obtain a key */
 			rdma_build_cmsg_dest(&msg, hdr->rdma_key);
+			cookie = hdr->rdma_key;
 			hdr->rdma_key = 0;
 		} else {
 			/* Use the RDMA_MAP cmsg to have sendmsg do the
 			 * mapping on the fly. */
 			rdma_build_cmsg_map(&msg, hdr->rdma_addr,
-					hdr->rdma_size);
+					hdr->rdma_size, &cookie);
 		}
 	}
 
@@ -1064,6 +1200,11 @@ static int send_packet(int fd, struct task *t,
 
 	if (rdma_flight_recorder)
 		*rdma_flight_recorder = 1;
+	if (cookie) {
+		/* We just happen to know that the r_key is in the
+		 * lower 32bit of the cookie */
+		rdma_key_o_meter_add(cookie);
+	}
 	t->send_seq++;
 	return ret;
 }
@@ -1475,6 +1616,9 @@ static struct child_control *start_children(struct options *opts)
 
 	init_msg_pattern(opts);
 
+	if (opts->rdma_key_o_meter)
+		rdma_key_o_meter_init(opts->nr_tasks);
+
 	for (i = 0; i < opts->nr_tasks; i++) {
 		pid = fork();
 		if (pid == -1)
@@ -1485,6 +1629,7 @@ static struct child_control *start_children(struct options *opts)
 				close(control_fd);
 				control_fd = -1;
 			}
+			rdma_key_o_meter_set_self(i);
 			run_child(parent, ctl + i, opts, i);
 			exit(0);
 		}
@@ -1904,6 +2049,8 @@ static void release_children_and_wait(struct options *opts,
 				get_perfdata(0);
 				printf("\n");
 			}
+
+			rdma_key_o_meter_check(opts->nr_tasks);
 		}
 
 		stat_accumulate(summary, disp);
@@ -1933,6 +2080,8 @@ static void release_children_and_wait(struct options *opts,
 
 	while (nr_running && reap_one_child(0))
 		nr_running--;
+
+	rdma_key_o_meter_check(opts->nr_tasks);
 
 	stat_total(disp, ctl, opts->nr_tasks);
 	if (!opts->summary_only)
@@ -2034,6 +2183,7 @@ static void encode_options(struct options *dst, const struct options *src)
 	dst->rdma_use_get_mr = src->rdma_use_get_mr;	/* byte sized */
 	dst->rdma_use_fence = src->rdma_use_fence;	/* byte sized */
 	dst->rdma_cache_mrs = src->rdma_cache_mrs;	/* byte sized */
+	dst->rdma_key_o_meter = src->rdma_key_o_meter;	/* byte sized */
 
 	dst->rdma_alignment = htonl(src->rdma_alignment);
 	dst->connect_retries = htonl(src->connect_retries);
@@ -2063,6 +2213,7 @@ static void decode_options(struct options *dst, const struct options *src)
 	dst->rdma_use_get_mr = src->rdma_use_get_mr;	/* byte sized */
 	dst->rdma_use_fence = src->rdma_use_fence;	/* byte sized */
 	dst->rdma_cache_mrs = src->rdma_cache_mrs;	/* byte sized */
+	dst->rdma_key_o_meter = src->rdma_key_o_meter;	/* byte sized */
 
 	dst->rdma_alignment = ntohl(src->rdma_alignment);
 	dst->connect_retries = ntohl(src->connect_retries);
@@ -2338,6 +2489,7 @@ enum {
 	OPT_RDMA_USE_NOTIFY,
 	OPT_RDMA_CACHE_MRS,
 	OPT_RDMA_ALIGNMENT,
+	OPT_RDMA_KEY_O_METER,
 	OPT_SHOW_PARAMS,
 	OPT_CONNECT_RETRIES,
 	OPT_USE_CONG_MONITOR,
@@ -2366,6 +2518,7 @@ static struct option long_options[] = {
 { "rdma-use-notify",	required_argument,	NULL,	OPT_RDMA_USE_NOTIFY },
 { "rdma-cache-mrs",	required_argument,	NULL,	OPT_RDMA_CACHE_MRS },
 { "rdma-alignment",	required_argument,	NULL,	OPT_RDMA_ALIGNMENT },
+{ "rdma-key-o-meter",	no_argument,		NULL,	OPT_RDMA_KEY_O_METER },
 { "show-params",	no_argument,		NULL,	OPT_SHOW_PARAMS },
 { "show-perfdata",	no_argument,		NULL,	OPT_PERFDATA },
 { "connect-retries",	required_argument,	NULL,	OPT_CONNECT_RETRIES },
@@ -2413,6 +2566,7 @@ int main(int argc, char **argv)
 	opts.rdma_use_fence = 1;
 	opts.rdma_cache_mrs = 0;
 	opts.rdma_alignment = 0;
+	opts.rdma_key_o_meter = 0;
 	opts.show_params = 0;
 	opts.connect_retries = 0;
 	opts.show_perfdata = 0;
@@ -2490,6 +2644,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_ALIGNMENT:
 				opts.rdma_alignment = parse_ull(optarg, sys_page_size);
+				break;
+			case OPT_RDMA_KEY_O_METER:
+				opts.rdma_key_o_meter = 1;
 				break;
 			case OPT_SHOW_PARAMS:
 				opts.show_params = 1;

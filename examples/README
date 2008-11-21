@@ -1,0 +1,6 @@
+The source in this directory is meant to serve as an aid for
+becoming familiar with RDS socket programming.
+
+Questions about this or other rds-tools code are welcomed on the
+rds-devel list: http://oss.oracle.com/mailman/listinfo/rds-devel
+

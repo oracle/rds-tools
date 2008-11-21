@@ -1,0 +1,15 @@
+SystemTap script for RDS
+
+SystemTap: http://sourceware.org/systemtap/
+SystemTap wiki: http://sourceware.org/systemtap/wiki
+
+To use SystemTap for tracing RDS, please ensure you
+have debugging symbols available for both your installed kernel
+as well as RDS module. These usually take the form of 
+*-debuginfo RPMs, and may be available via your distro's
+update repository, a distro repository disabled by
+default, or via your distro's website.
+
+Please send any comments or improvement patches to
+rds-devel@oss.oracle.com.
+

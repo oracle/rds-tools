@@ -1,0 +1,35 @@
+/*
+probe module("rds").function("rds_*")
+{
+	printf("RDS %s\n", pp())
+}
+*/
+
+global reads
+
+probe begin
+{
+	reads <<< 0
+}
+
+probe module("rds").function("rds_recvmsg").return
+{
+	reads <<< ret
+}
+
+probe module("rds").function("rds_send_pong").return
+{
+	reads <<< ret
+	//println(caller())
+}
+
+probe timer.sec(5)
+{
+	println("RDS bytes received")
+	print(@hist_log(reads))
+}
+
+probe end
+{
+	printf("end!\n")
+}

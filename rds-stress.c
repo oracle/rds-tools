@@ -766,7 +766,7 @@ static void rds_fill_buffer(void *buf, size_t size, uint64_t pattern)
 		*pos++ = pattern;
 }
 
-
+#if 0
 static void  rds_dump_buffer(const void *buf, size_t size)
 {
 	const uint64_t *pos;
@@ -784,6 +784,7 @@ static void  rds_dump_buffer(const void *buf, size_t size)
 		printf(" %016Lx", (unsigned long long) *pos++);
 	}
 }
+#endif
 
 static void rds_compare_buffer(uint64_t *addr, int size, uint64_t pattern)
 {

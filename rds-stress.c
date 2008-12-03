@@ -230,11 +230,11 @@ static unsigned long long parse_ull(char *ptr, unsigned long long max)
 static uint32_t parse_addr(char *ptr)
 {
 	uint32_t addr;
-        struct hostent *hent;
+	struct hostent *hent;
 
-        hent = gethostbyname(ptr);
-        if (hent && 
-            hent->h_addrtype == AF_INET && hent->h_length == sizeof(addr)) {
+	hent = gethostbyname(ptr);
+	if (hent &&
+	    hent->h_addrtype == AF_INET && hent->h_length == sizeof(addr)) {
 		memcpy(&addr, hent->h_addr, sizeof(addr));
 		return ntohl(addr);
 	}
@@ -403,7 +403,7 @@ static int check_hdr(void *message, uint32_t bytes, const struct header *hdr)
 		msghdr.var == hdr->var ? " =" : "!=",	\
 		disp(msghdr.var)
 
-		/* 
+		/*
 		 * This is printed as one GIANT printf() so that it serializes
 		 * with stdout() and we don't get things stomping on each
 		 * other
@@ -472,7 +472,7 @@ int64_t tv_cmp(const struct timeval *a, const struct timeval *b)
 /* returns a - b in usecs */
 uint64_t usec_sub(struct timeval *a, struct timeval *b)
 {
-	return ((uint64_t)(a->tv_sec - b->tv_sec) * 1000000ULL) + 
+	return ((uint64_t)(a->tv_sec - b->tv_sec) * 1000000ULL) +
 		a->tv_usec - b->tv_usec;
 }
 
@@ -514,7 +514,7 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 
 	fd = bound_socket(PF_RDS, SOCK_SEQPACKET, 0, sin);
 
-	bytes = opts->nr_tasks * opts->req_depth * 
+	bytes = opts->nr_tasks * opts->req_depth *
 		(opts->req_size + opts->ack_size) * 2;
 
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(bytes)))
@@ -2399,7 +2399,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
  * The soaker *constantly* spins calling getpid().  It tries to execute a
  * second's worth of calls before checking that it's parent is still alive.  It
  * uses gettimeofday() to figure out the per-second rate of the series it just
- * executed.  It always tries to work from the highest rate it ever saw.  
+ * executed.  It always tries to work from the highest rate it ever saw.
  */
 static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 {
@@ -2576,47 +2576,47 @@ int main(int argc, char **argv)
 	opts.connect_retries = 0;
 	opts.show_perfdata = 0;
 
-        while(1) {
+	while(1) {
 		int c, index;
 
 		c = getopt_long(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:vVz",
 				long_options, &index);
-                if (c == -1)
-                        break;
+		if (c == -1)
+			break;
 
-                switch(c) {
-                        case 'a':
+		switch(c) {
+			case 'a':
 				opts.ack_size = parse_ull(optarg, (uint32_t)~0);
-                                break;
-                        case 'c':
+				break;
+			case 'c':
 				soak_arr = start_soakers();
-                                break;
+				break;
 			case 'D':
 				opts.rdma_size = parse_ull(optarg, (uint32_t)~0);
 				break;
-                        case 'd':
+			case 'd':
 				opts.req_depth = parse_ull(optarg,(uint32_t)~0);
-                                break;
-                        case 'p':
+				break;
+			case 'p':
 				opts.starting_port = parse_ull(optarg,
 							       (uint16_t)~0);
-                                break;
-                        case 'q':
+				break;
+			case 'q':
 				opts.req_size = parse_ull(optarg, (uint32_t)~0);
-                                break;
+				break;
 			case 'R':
 				opts.rtprio = 1;
 				break;
-                        case 'r':
+			case 'r':
 				opts.receive_addr = parse_addr(optarg);
-                                break;
-                        case 's':
+				break;
+			case 's':
 				opts.send_addr = parse_addr(optarg);
-                                break;
-                        case 't':
+				break;
+			case 't':
 				opts.nr_tasks = parse_ull(optarg,
 							  (uint16_t)~0);
-                                break;
+				break;
 			case 'T':
 				opts.run_time = parse_ull(optarg, (uint32_t)~0);
 				break;
@@ -2662,13 +2662,13 @@ int main(int argc, char **argv)
 			case OPT_PERFDATA:
 				opts.show_perfdata = 1;
 				break;
-                        case 'h':
-                        case '?':
-                        default:
+			case 'h':
+			case '?':
+			default:
 				usage();
 				break;
-                }
-        }
+		}
+	}
 
 	if (opts.rdma_use_once == 0xff)
 		opts.rdma_use_once = !opts.rdma_cache_mrs;

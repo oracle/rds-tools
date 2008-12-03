@@ -26,10 +26,9 @@
 sends messages between groups tasks, usually running on seperate
 machines.
 .Pp
-First a passive receiving instance is started.  It only needs to be told
-what port to listen on.
+First a passive receiving instance is started.
 .Pp
-.Dl $ rds-stress -p 4000
+.Dl $ rds-stress
 .Pp
 Then an active sending instance is started, giving it
 the address and port at which it will find a listening

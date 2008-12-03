@@ -245,12 +245,13 @@ static uint32_t parse_addr(char *ptr)
 static void usage(void)
 {
 	printf(
-	"Required parameters, no defaults:\n"
-	" -r [addr]         receive on this host or dotted quad\n"
-	" -s [addr]         send to this passive dotted quad\n"
 	"\n"
-	"Optional parameters, with defaults:\n"
+	"Send & Recv parameters:\n"
+	" -r [addr]         use this local address\n"
 	" -p [port, 4000]   starting port number\n"
+	"\n"
+	"Send parameters:\n"
+	" -s [addr]         send to this address (required)\n"
 	" -a [bytes, %u]    ack message length\n"
 	" -q [bytes, 1024]  request message length\n"
 	" -d [depth, 1]     request pipeline depth, nr outstanding\n"
@@ -258,14 +259,14 @@ static void usage(void)
 	" -T [seconds, 0]   runtime of test, 0 means infinite\n"
 	" -D [bytes]        RDMA size (RDSv3 only)\n"
 	"\n"
-	"Optional behavioural flags:\n"
+	"Optional flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
 	" -V                trace execution\n"
 	" -z                print a summary at end of test only\n"
 	"\n"
 	"Example:\n"
-	"  recv$ rds-stress -r recv\n"
-	"  send$ rds-stress -r send -s recv -p 4000 -q 4096 -t 2 -d 2\n"
+	"  recv$ rds-stress\n"
+	"  send$ rds-stress -s recv -q 4096 -t 2 -d 2\n"
 	"\n", (int) MIN_MSG_BYTES);
 
 	exit(2);

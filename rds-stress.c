@@ -246,11 +246,11 @@ static void usage(void)
 {
 	printf(
 	"Required parameters, no defaults:\n"
-	" -p [port]         starting port number\n"
 	" -r [addr]         receive on this host or dotted quad\n"
 	" -s [addr]         send to this passive dotted quad\n"
 	"\n"
 	"Optional parameters, with defaults:\n"
+	" -p [port, 4000]   starting port number\n"
 	" -a [bytes, %u]    ack message length\n"
 	" -q [bytes, 1024]  request message length\n"
 	" -d [depth, 1]     request pipeline depth, nr outstanding\n"
@@ -264,7 +264,7 @@ static void usage(void)
 	" -z                print a summary at end of test only\n"
 	"\n"
 	"Example:\n"
-	"  recv$ rds-stress -r recv -p 4000\n"
+	"  recv$ rds-stress -r recv\n"
 	"  send$ rds-stress -r send -s recv -p 4000 -q 4096 -t 2 -d 2\n"
 	"\n", (int) MIN_MSG_BYTES);
 
@@ -2557,6 +2557,7 @@ int main(int argc, char **argv)
 		usage();
 
 	opts.receive_addr = 0;
+	opts.starting_port = 4000;
 	opts.ack_size = MIN_MSG_BYTES;
 	opts.req_size = 1024;
 	opts.run_time = 0;
@@ -2667,9 +2668,6 @@ int main(int argc, char **argv)
 				break;
                 }
         }
-
-	if (opts.starting_port == (uint16_t)~0)
-		die("specify starting port with -p\n");
 
 	if (opts.rdma_use_once == 0xff)
 		opts.rdma_use_once = !opts.rdma_cache_mrs;

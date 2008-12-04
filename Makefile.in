@@ -73,7 +73,13 @@ EXTRA_DIST := 	rds-info.1 \
 		configure.in \
 		configure \
 		README \
-		rds-tools.txt
+		rds-tools.txt \
+		stap/rds.stp \
+		stap/README \
+		docs/rds-architecture.txt \
+		examples/Makefile \
+		examples/rds-sample.c \
+		examples/README
 
 DISTFILES := $(SOURCES) $(HEADERS) $(EXTRA_DIST)
 

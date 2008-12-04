@@ -2554,9 +2554,6 @@ int main(int argc, char **argv)
 
 	memset(&opts, 0xff, sizeof(opts));
 
-	if (argc == 1)
-		usage();
-
 	opts.receive_addr = 0;
 	opts.starting_port = 4000;
 	opts.ack_size = MIN_MSG_BYTES;

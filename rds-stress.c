@@ -1860,7 +1860,7 @@ get_perfdata(int initialize)
 	}
 
 	if (item_size > sizeof(*ctr))
-		die("Bad counter item size in RDS_INFO_COUNTERS (got %d, max %ld)\n",
+		die("Bad counter item size in RDS_INFO_COUNTERS (got %d, max %zd)\n",
 				item_size, sizeof(*ctr));
 	count = buflen / item_size;
 

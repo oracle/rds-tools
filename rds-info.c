@@ -183,26 +183,6 @@ static void print_msgs(void *data, int each, socklen_t len, void *extra)
 	}
 }
 
-static void print_tcp_socks(void *data, int each, socklen_t len, void *extra)
-{		
-	struct rds_info_tcp_socket ts;
-
-	printf("\nTCP Connections:\n"
-		"%15s %5s %15s %5s %10s %10s %10s %10s %10s\n",
-		"LocalAddr", "LPort", "RemoteAddr", "RPort",
-		"HdrRemain", "DataRemain", "SentNxt", "ExpectUna", "SeenUna");
-	
-	for_each(ts, data, each, len) {
-		printf("%15s %5u %15s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
-			ipv4addr(ts.local_addr),
-			ntohs(ts.local_port),
-			ipv4addr(ts.peer_addr),
-			ntohs(ts.peer_port),
-			ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
-			ts.last_expected_una, ts.last_seen_una);
-	}
-}
-
 static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_ib_connection ic;
@@ -250,8 +230,6 @@ struct info infos[] = {
 		print_msgs, "Send", 0 },
 	['t'] = { RDS_INFO_RETRANS_MESSAGES, "retransmit queue messages",
 		  print_msgs, "Retransmit", 0 },
-	['T'] = { RDS_INFO_TCP_SOCKETS, "TCP transport sockets",
-		  print_tcp_socks, NULL, 0 },
 	['I'] = { RDS_INFO_IB_CONNECTIONS, "IB transport connections",
 		  print_ib_conns, NULL, 0 },
 };

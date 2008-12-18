@@ -1512,6 +1512,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	sin.sin_port = htons(opts->starting_port + 1 + id);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
 
+	/* give main display thread a little edge? */
+	nice(5);
+
 	memset(tasks, 0, sizeof(tasks));
 	for (i = 0; i < opts->nr_tasks; i++) {
 		tasks[i].nr = i;

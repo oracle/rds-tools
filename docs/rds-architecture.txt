@@ -27,8 +27,10 @@ cluster - so in a cluster with N processes you need N sockets, in contrast
 to N*N if you use a connection-oriented socket transport like TCP.
 
 RDS is not Infiniband-specific; it was designed to support different
-transports.  The current implementation supports RDS over IB as well as
-TCP. Work is in progress to support RDS over iWARP.
+transports.  The current implementation used to support RDS over TCP as well
+as IB. Work is in progress to support RDS over iWARP, and using DCE to
+guarantee no dropped packets on Ethernet, it may be possible to use RDS over
+UDP in the future.
 
 The high-level semantics of RDS from the application's point of view are
 

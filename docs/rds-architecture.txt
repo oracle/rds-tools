@@ -351,11 +351,6 @@ The recv path
   rds_recvmsg
     copy data into user iovec
     handle CMSGs
+    return to application
 
 
-RDS over Infiniband
-===================
-
-  ib_cm
-  rds_ib_xmit
-  ib_rdma

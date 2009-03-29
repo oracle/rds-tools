@@ -80,8 +80,13 @@ static int discover_constant(const char *path, int official, int *found)
 		return *found;
 
 	fd = open(path, O_RDONLY);
-	if (fd < 0)
-		explode("Can't open address constant");
+	if (fd < 0) {
+		/* hmm, no more constants in /proc. we must not need it anymore
+		 * so use official values.
+		 */
+		*found = official;
+		return official;
+	}
 
 	while (total < sizeof(buf)) {
 		ret = read(fd, buf + total, sizeof(buf) - total);

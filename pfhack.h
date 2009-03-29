@@ -44,8 +44,8 @@
 #ifndef __PF_HACK_H
 #define __PF_HACK_H
 
-#define OFFICIAL_PF_RDS		32
-#define OFFICIAL_SOL_RDS	272
+#define OFFICIAL_PF_RDS		21
+#define OFFICIAL_SOL_RDS	276
 
 
 #ifdef DYNAMIC_PF_RDS

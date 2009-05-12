@@ -42,6 +42,12 @@
  *  - final stats summary page
  */
 
+enum {
+        M_RDMA_READWRITE = 0,
+        M_RDMA_READ_ONLY,
+        M_RDMA_WRITE_ONLY
+};
+
 struct options {
 	uint32_t	req_depth;
 	uint32_t	req_size;
@@ -65,7 +71,9 @@ struct options {
 	uint8_t		rdma_cache_mrs;
 	uint8_t		rdma_key_o_meter;
 	uint8_t		suppress_warnings;
-
+        uint8_t         simplex;
+        uint8_t         rw_mode;
+	uint32_t        rdma_vector;
 	uint32_t	rdma_alignment;
 	uint32_t	connect_retries;
 } __attribute__((packed));
@@ -87,6 +95,8 @@ enum {
 	S_ACK_RX_BYTES,
 	S_RDMA_WRITE_BYTES,
 	S_RDMA_READ_BYTES,
+	S_MBUS_IN_BYTES,
+	S_MBUS_OUT_BYTES,
 	S_SENDMSG_USECS,
 	S_RTT_USECS,
 	S__LAST
@@ -152,6 +162,7 @@ struct header {
 	uint64_t	rdma_pattern;
 	uint64_t	rdma_key;
 	uint32_t	rdma_size;
+	uint32_t        rdma_vector;
 
 	uint8_t		data[0];
 } __attribute__((packed));
@@ -258,6 +269,8 @@ static void usage(void)
 	" -t [nr, 1]        number of child tasks\n"
 	" -T [seconds, 0]   runtime of test, 0 means infinite\n"
 	" -D [bytes]        RDMA size (RDSv3 only)\n"
+        " -M [nr,0]         rdma mode (0=readwrite,1=readonly,2=writeonly)\n"
+        " -O [simplex,0]    only one side sends requests vs both\n"
 	"\n"
 	"Optional flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
@@ -342,6 +355,7 @@ static void encode_hdr(struct header *dst, const struct header *hdr)
 	dst->rdma_pattern = htonll(hdr->rdma_pattern);
 	dst->rdma_key = htonll(hdr->rdma_key);
 	dst->rdma_size = htonl(hdr->rdma_size);
+	dst->rdma_vector = htonl(hdr->rdma_vector);
 }
 
 static void decode_hdr(struct header *dst, const struct header *hdr)
@@ -362,6 +376,7 @@ static void decode_hdr(struct header *dst, const struct header *hdr)
 	dst->rdma_pattern = ntohll(hdr->rdma_pattern);
 	dst->rdma_key = ntohll(hdr->rdma_key);
 	dst->rdma_size = ntohl(hdr->rdma_size);
+	dst->rdma_vector = ntohl(hdr->rdma_vector);
 }
 
 static void fill_hdr(void *message, uint32_t bytes, struct header *hdr)
@@ -844,7 +859,7 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 
 	/* We use mmap here rather than malloc, because it is always
 	 * page aligned. */
-	len = 2 * opts->nr_tasks * opts->req_depth * opts->rdma_size + sys_page_size;
+	len = 2 * opts->nr_tasks * opts->req_depth * (opts->rdma_vector * opts->rdma_size) + sys_page_size;
 	base = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0);
 	if (base == MAP_FAILED)
 		die_errno("alloc_rdma_buffers: mmap failed");
@@ -854,10 +869,10 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 	for (i = 0; i < opts->nr_tasks; ++i, ++t) {
 		for (j = 0; j < opts->req_depth; ++j) {
 			t->rdma_buf[j] = (uint64_t *) base;
-			base += opts->rdma_size;
+			base += opts->rdma_size * opts->rdma_vector;
 
 			t->local_buf[j] = (uint64_t *) base;
-			base += opts->rdma_size;
+			base += opts->rdma_size * opts->rdma_vector;
 
 			t->rdma_req_key[j] = 0;
 			t->rdma_inflight[j] = 0;
@@ -866,7 +881,7 @@ static void alloc_rdma_buffers(struct task *t, struct options *opts)
 }
 
 static void rdma_build_req(int fd, struct header *hdr, struct task *t,
-		unsigned int rdma_size, unsigned int req_depth)
+		unsigned int rdma_size, unsigned int req_depth, int rw_mode, int rdma_vector)
 {
 	uint64_t *rdma_addr, *rdma_key_p;
 
@@ -874,17 +889,23 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 
 	rdma_key_p = &t->rdma_req_key[t->send_index];
 	if (opt.rdma_use_get_mr && *rdma_key_p == 0)
-		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size);
+		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size * rdma_vector);
 
 	/* We alternate between RDMA READ and WRITEs */
 	hdr->rdma_op = t->rdma_next_op;
-	t->rdma_next_op = RDMA_OP_TOGGLE(t->rdma_next_op);
+        if (M_RDMA_READWRITE == rw_mode)
+                t->rdma_next_op = RDMA_OP_TOGGLE(t->rdma_next_op);
+        else if (M_RDMA_READ_ONLY == rw_mode)
+                t->rdma_next_op = RDMA_OP_READ;
+        else
+                t->rdma_next_op = RDMA_OP_WRITE;
 
 	hdr->rdma_pattern = (((uint64_t) t->send_seq) << 32) | getpid();
 	hdr->rdma_addr = ptr64(rdma_addr);
 	hdr->rdma_phyaddr = 0;
 	hdr->rdma_size = rdma_size;
 	hdr->rdma_key = *rdma_key_p;
+	hdr->rdma_vector = rdma_vector;
 
 	if (RDMA_OP_READ == hdr->rdma_op) {
 		if (opt.verify)
@@ -906,10 +927,16 @@ static void rdma_build_req(int fd, struct header *hdr, struct task *t,
 static void rdma_validate(const struct header *in_hdr, struct options *opts)
 {
 	unsigned long	rdma_size;
+        unsigned long   rdma_vector;
 
 	rdma_size = in_hdr->rdma_size;
 	if (rdma_size != opts->rdma_size)
 		die("Unexpected RDMA size %lu in request\n", rdma_size);
+
+	rdma_vector = in_hdr->rdma_vector;
+        if (rdma_vector != opts->rdma_vector)
+                die("Unexpected RDMA vector %lu in request %u \n", rdma_vector, opts->rdma_vector);
+
 
 	if (in_hdr->rdma_op != RDMA_OP_READ && in_hdr->rdma_op != RDMA_OP_WRITE)
 		die("Unexpected RDMA op %u in request\n", in_hdr->rdma_op);
@@ -931,6 +958,7 @@ static void rdma_build_ack(struct header *hdr, const struct header *in_hdr)
 	hdr->rdma_phyaddr = in_hdr->rdma_phyaddr; /* remote's address to rdma to / from */
 	hdr->rdma_addr = in_hdr->rdma_addr; /* remote's address to rdma to / from */
 	hdr->rdma_pattern = in_hdr->rdma_pattern;
+	hdr->rdma_vector = in_hdr->rdma_vector;
 }
 
 static inline unsigned int rdma_user_token(struct task *t, unsigned int qindex)
@@ -1003,31 +1031,41 @@ static void rdma_put_cmsg(struct msghdr *msg, int type,
 static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 		unsigned int user_token, void *local_buf)
 {
-	static struct rds_iovec iov;
+
+#define RDS_MAX_IOV 512 /* FIX_ME - put this into rds.h or use socket max ?*/
+
+	static struct rds_iovec iov[RDS_MAX_IOV];
 	struct rds_rdma_args args;
 	unsigned int rdma_size;
+	unsigned int rdma_vector;
+	unsigned int v;
 
 	rdma_size = hdr->rdma_size;
+	rdma_vector = hdr->rdma_vector;
 
-	trace("RDS issuing rdma for token %x key %Lx len %u local_buf %p\n",
+	trace("RDS issuing rdma for token %x key %Lx len %u local_buf %p vector %u\n",
 			user_token,
 			(unsigned long long) hdr->rdma_key,
-			rdma_size, local_buf);
+			rdma_size, local_buf,
+			rdma_vector);
 
 	/* rdma args */
 	memset(&args, 0, sizeof(args));
 
 	/* Set up the iovec pointing to the RDMA buffer */
-	args.local_vec_addr = (uint64_t) &iov;
-	args.nr_local = 1;
-	iov.addr = ptr64(local_buf);
-	iov.bytes = rdma_size;
+	args.local_vec_addr = (uint64_t) iov;
+	args.nr_local = rdma_vector;
+
+	for (v = 0; v < rdma_vector; v++) {
+		iov[v].addr = ptr64((local_buf + (rdma_size * v)));
+		iov[v].bytes = rdma_size;
+	}
 
 	/* The remote could either give us a physical address, or
 	 * an index into a zero-based FMR. Either way, we just copy it.
 	 */
 	args.remote_vec.addr = hdr->rdma_phyaddr;
-	args.remote_vec.bytes = rdma_size;
+	args.remote_vec.bytes = rdma_size * rdma_vector;
 	args.cookie = hdr->rdma_key;
 
 	/* read or write */
@@ -1045,7 +1083,12 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg, const struct header *hdr,
 	}
 
 	/* Fence off subsequent SENDs - this is the default */
-	if (opt.rdma_use_fence)
+	/* for rdma read operations. We force this fence to control */
+	/* order of remote immediate data rm completion */
+	/* If we do not use a fence the immediate send rm can complete */
+	/* before rdma data arrives.. */
+
+	if (!(args.flags & RDS_RDMA_READWRITE) && opt.rdma_use_fence)
 		args.flags |= RDS_RDMA_FENCE;
 
 	args.flags |= RDS_RDMA_NOTIFY_ME;
@@ -1096,7 +1139,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		/* remote node wrote local buffer check pattern
 		 * sent via immediate data in rdma buffer
 		 */
-		stat_inc(&ctl->cur[S_RDMA_READ_BYTES],  hdr->rdma_size);
+		stat_inc(&ctl->cur[S_MBUS_IN_BYTES],  hdr->rdma_size);
 
 		if (opt.verify) {
 			/* This funny looking cast avoids compile warnings
@@ -1108,7 +1151,7 @@ static void rdma_process_ack(int fd, struct header *hdr,
 		break;
 
 	case RDMA_OP_READ:
-		stat_inc(&ctl->cur[S_RDMA_WRITE_BYTES],  hdr->rdma_size);
+		stat_inc(&ctl->cur[S_MBUS_OUT_BYTES],  hdr->rdma_size);
 		break;
 	}
 }
@@ -1224,7 +1267,9 @@ static int send_one(int fd, struct task *t,
 	if (opts->rdma_size && t->send_seq > 10)
 		rdma_build_req(fd, &hdr, t,
 				opts->rdma_size,
-				opts->req_depth);
+				opts->req_depth,
+				opts->rw_mode,
+				opts->rdma_vector);
 
 
 	gettimeofday(&start, NULL);
@@ -1265,11 +1310,11 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 	/* need separate rdma stats cells for send/recv */
 	switch (hdr->rdma_op) {
 	case RDMA_OP_WRITE:
-		stat_inc(&ctl->cur[S_RDMA_WRITE_BYTES], opts->rdma_size);
+		stat_inc(&ctl->cur[S_MBUS_OUT_BYTES], opts->rdma_size);
 		break;
 
 	case RDMA_OP_READ:
-		stat_inc(&ctl->cur[S_RDMA_READ_BYTES], opts->rdma_size);
+		stat_inc(&ctl->cur[S_MBUS_IN_BYTES], opts->rdma_size);
 		break;
 	}
 
@@ -1301,11 +1346,11 @@ eagain:
 static int send_anything(int fd, struct task *t,
 			struct options *opts,
 			struct child_control *ctl,
-			int can_send)
+			int can_send, int do_work)
 {
 	if (ack_anything(fd, t, opts, ctl, can_send) < 0)
 		return -1;
-	while (t->pending < opts->req_depth) {
+	while (do_work && t->pending < opts->req_depth) {
 		if (!can_send)
 			goto eagain;
 		if (send_one(fd, t, opts, ctl) < 0)
@@ -1498,7 +1543,7 @@ static int recv_one(int fd, struct task *tasks,
 }
 
 static void run_child(pid_t parent_pid, struct child_control *ctl,
-		      struct options *opts, uint16_t id)
+		      struct options *opts, uint16_t id, int active)
 {
 	struct sockaddr_in sin;
 	struct pollfd pfd;
@@ -1507,6 +1552,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
 	struct timeval start;
+        int do_work = opts->simplex ? active : 1;
 
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(opts->starting_port + 1 + id);
@@ -1579,7 +1625,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				continue;
 			if (t->drain_rdmas)
 				continue;
-			if (send_anything(fd, t, opts, ctl, can_send) < 0) {
+			if (send_anything(fd, t, opts, ctl, can_send, do_work) < 0) {
 				pfd.events |= POLLOUT;
 
 				/* If the send queue is full, we will see EAGAIN.
@@ -1603,7 +1649,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	}
 }
 
-static struct child_control *start_children(struct options *opts)
+static struct child_control *start_children(struct options *opts, int active)
 {
 	struct child_control *ctl;
 	pid_t parent = getpid();
@@ -1635,7 +1681,7 @@ static struct child_control *start_children(struct options *opts)
 				control_fd = -1;
 			}
 			rdma_key_o_meter_set_self(i);
-			run_child(parent, ctl + i, opts, i);
+			run_child(parent, ctl + i, opts, i, active);
 			exit(0);
 		}
 		ctl[i].pid = pid;
@@ -1668,9 +1714,14 @@ static double throughput(struct counter *disp)
 		disp[S_ACK_TX_BYTES].sum + disp[S_ACK_RX_BYTES].sum;
 }
 
-static double throughput_rdma(struct counter *disp)
+static double throughput_mbi(struct counter *disp)
 {
-	return disp[S_RDMA_WRITE_BYTES].sum + disp[S_RDMA_READ_BYTES].sum;
+	return disp[S_MBUS_IN_BYTES].sum;
+}
+
+static double throughput_mbo(struct counter *disp)
+{
+        return disp[S_MBUS_OUT_BYTES].sum;
 }
 
 void stat_snapshot(struct counter *disp, struct child_control *ctl,
@@ -1992,9 +2043,9 @@ static void release_children_and_wait(struct options *opts,
 		get_perfdata(1);
 		printf("\n");
 	} else {
-		printf("%4s %6s %10s %10s %7s %8s %5s\n",
-			"tsks", "tx/s", "tx+rx K/s", "rw+rr K/s",
-			"tx us/c", "rtt us", "cpu %");
+		printf("%4s %6s %6s %10s %10s %10s %7s %8s %5s\n",
+			"tsks", "tx/s", "rx/s", "tx+rx K/s", "mbi K/s",
+			"mbo K/s", "tx us/c", "rtt us", "cpu %");
 	}
 
 	last_ts = first_ts;
@@ -2028,11 +2079,13 @@ static void release_children_and_wait(struct options *opts,
 			scale = 1e6 / usec_sub(&now, &last_ts);
 
 			if (!opt.show_perfdata) {
-				printf("%4u %6"PRIu64" %10.2f %10.2f %7.2f %8.2f %5.2f\n",
+				printf("%4u %6"PRIu64" %6"PRIu64" %10.2f %10.2f %10.2f %7.2f %8.2f %5.2f\n",
 					nr_running,
 					disp[S_REQ_TX_BYTES].nr,
+					disp[S_REQ_RX_BYTES].nr,
 					scale * throughput(disp) / 1024.0,
-					scale * throughput_rdma(disp) / 1024.0,
+					scale * throughput_mbi(disp) / 1024.0,
+					scale * throughput_mbo(disp) / 1024.0,
 					scale * avg(&disp[S_SENDMSG_USECS]),
 					scale * avg(&disp[S_RTT_USECS]),
 					scale * cpu);
@@ -2042,10 +2095,11 @@ static void release_children_and_wait(struct options *opts,
 				       opts->nr_tasks, opts->req_size,
 				       opts->ack_size, opts->rdma_size);
 
-				printf("%Lu,%f,%f,%f,%f,%f",
+				printf("%Lu,%f,%f,%f,%f,%f,%f",
 					(unsigned long long) disp[S_REQ_TX_BYTES].nr,
 					scale * throughput(disp) / 1024.0,
-					scale * throughput_rdma(disp) / 1024.0,
+					scale * throughput_mbi(disp) / 1024.0,
+					scale * throughput_mbo(disp) / 1024.0,
 					scale * avg(&disp[S_SENDMSG_USECS]),
 					scale * avg(&disp[S_RTT_USECS]),
 					cpu >= 0? scale * cpu : 0);
@@ -2096,11 +2150,12 @@ static void release_children_and_wait(struct options *opts,
 
 		scale = 1e6 / usec_sub(&last_ts, &first_ts);
 
-		printf("%4u %6lu %10.2f %10.2f %7.2f %8.2f %5.2f  (average)\n",
+		printf("%4u %6lu %10.2f %10.2f %10.2f %7.2f %8.2f %5.2f  (average)\n",
 			opts->nr_tasks,
 			(long) (scale * summary[S_REQ_TX_BYTES].nr),
 			scale * throughput(summary) / 1024.0,
-			scale * throughput_rdma(disp) / 1024.0,
+			scale * throughput_mbi(disp) / 1024.0,
+			scale * throughput_mbo(disp) / 1024.0,
 			avg(&summary[S_SENDMSG_USECS]),
 			avg(&summary[S_RTT_USECS]),
 			soak_arr? scale * cpu_total : -1.0);
@@ -2196,6 +2251,9 @@ static void encode_options(struct options *dst, const struct options *src)
 	dst->connect_retries = htonl(src->connect_retries);
 
 	dst->suppress_warnings = src->suppress_warnings;/* byte sized */
+        dst->simplex = src->simplex;                    /* byte sized */
+        dst->rw_mode = src->rw_mode;                    /* byte sized */
+        dst->rdma_vector = htonl(src->rdma_vector);
 }
 
 static void decode_options(struct options *dst, const struct options *src)
@@ -2226,6 +2284,9 @@ static void decode_options(struct options *dst, const struct options *src)
 	dst->connect_retries = ntohl(src->connect_retries);
 
 	dst->suppress_warnings = src->suppress_warnings;/* byte sized */
+        dst->simplex = src->simplex;                    /* byte sized */
+        dst->rw_mode = src->rw_mode;                    /* byte sized */
+	dst->rdma_vector = ntohl(src->rdma_vector);
 }
 
 static void verify_option_encdec(const struct options *opts)
@@ -2321,7 +2382,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	peer_send(fd, &enc_options, sizeof(struct options));
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
-	ctl = start_children(opts);
+	ctl = start_children(opts, 1);
 
 	/* Tell the peer to start up. This is necessary when testing
 	 * with a large number of tasks, because otherwise the peer
@@ -2386,7 +2447,7 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	opts->receive_addr = addr;
 	opt = *opts;
 
-	ctl = start_children(opts);
+	ctl = start_children(opts, 0);
 
 	/* Wait for "GO" from the initiating peer */
 	peer_recv(fd, &ok, sizeof(ok));
@@ -2575,11 +2636,14 @@ int main(int argc, char **argv)
 	opts.show_params = 0;
 	opts.connect_retries = 0;
 	opts.show_perfdata = 0;
+        opts.simplex = 0;
+        opts.rw_mode = 0;
+	opts.rdma_vector = 1;
 
 	while(1) {
 		int c, index;
 
-		c = getopt_long(argc, argv, "+a:cD:d:hp:q:Rr:s:t:T:vVz",
+		c = getopt_long(argc, argv, "+a:cD:d:hM:Op:q:Rr:s:t:T:U:vVz",
 				long_options, &index);
 		if (c == -1)
 			break;
@@ -2597,6 +2661,12 @@ int main(int argc, char **argv)
 			case 'd':
 				opts.req_depth = parse_ull(optarg,(uint32_t)~0);
 				break;
+                        case 'M':
+                                opts.rw_mode = parse_ull(optarg,2);
+                                break;
+                        case 'O':
+                                opts.simplex = 1;
+                                break;
 			case 'p':
 				opts.starting_port = parse_ull(optarg,
 							       (uint16_t)~0);
@@ -2620,6 +2690,9 @@ int main(int argc, char **argv)
 			case 'T':
 				opts.run_time = parse_ull(optarg, (uint32_t)~0);
 				break;
+                        case 'U':
+                                opts.rdma_vector = parse_ull(optarg,512);
+                                break;
 			case 'z':
 				opts.summary_only = 1;
 				break;

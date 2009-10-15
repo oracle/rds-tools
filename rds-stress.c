@@ -265,12 +265,13 @@ static void usage(void)
 	" -s [addr]         send to this address (required)\n"
 	" -a [bytes, %u]    ack message length\n"
 	" -q [bytes, 1024]  request message length\n"
+        " -o                datagrams sent one way only (default is both)\n"
 	" -d [depth, 1]     request pipeline depth, nr outstanding\n"
 	" -t [nr, 1]        number of child tasks\n"
 	" -T [seconds, 0]   runtime of test, 0 means infinite\n"
-	" -D [bytes]        RDMA size (RDSv3 only)\n"
-        " -M [nr,0]         rdma mode (0=readwrite,1=readonly,2=writeonly)\n"
-        " -O [simplex,0]    only one side sends requests vs both\n"
+	" -D [bytes]        RDMA: size\n"
+	" -I [iovecs, 1]    RDMA: number of user buffers to target (max 512)\n"
+        " -M [nr, 0]        RDMA: mode (0=readwrite,1=readonly,2=writeonly)\n"
 	"\n"
 	"Optional flags:\n"
 	" -c                measure cpu use with per-cpu soak processes\n"
@@ -2661,10 +2662,13 @@ int main(int argc, char **argv)
 			case 'd':
 				opts.req_depth = parse_ull(optarg,(uint32_t)~0);
 				break;
+                        case 'I':
+                                opts.rdma_vector = parse_ull(optarg,512);
+                                break;
                         case 'M':
                                 opts.rw_mode = parse_ull(optarg,2);
                                 break;
-                        case 'O':
+                        case 'o':
                                 opts.simplex = 1;
                                 break;
 			case 'p':
@@ -2690,9 +2694,6 @@ int main(int argc, char **argv)
 			case 'T':
 				opts.run_time = parse_ull(optarg, (uint32_t)~0);
 				break;
-                        case 'U':
-                                opts.rdma_vector = parse_ull(optarg,512);
-                                break;
 			case 'z':
 				opts.summary_only = 1;
 				break;

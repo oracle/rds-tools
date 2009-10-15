@@ -304,6 +304,7 @@ int main(int argc, char **argv)
 	}
 
 	for (i = 0; i < array_size(infos); i++) {
+		int invalid_opt = 0;
 		if (!infos[i].opt_val ||
 		    (given_options && !infos[i].option_given))
 			continue;
@@ -315,7 +316,8 @@ int main(int argc, char **argv)
 				verbosef(0, stderr,
 					 "%s: Unable get statistics: %s\n",
 					 progname, strerror(errno));
-				return 1;
+				invalid_opt = 1;
+				break;
 			}
 			if (data)
 				data = realloc(data, len);
@@ -330,6 +332,9 @@ int main(int argc, char **argv)
 				return 1;
 			}
 		}
+
+		if (invalid_opt)
+			continue;
 
 		infos[i].print(data, each, len, infos[i].extra);
 

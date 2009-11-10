@@ -101,12 +101,14 @@ struct rds_info_counter {
 #define RDS_INFO_CONNECTION_FLAG_CONNECTING	0x02
 #define RDS_INFO_CONNECTION_FLAG_CONNECTED	0x04
 
+#define TRANSNAMSIZ     16
+
 struct rds_info_connection {
 	u_int64_t	next_tx_seq;
 	u_int64_t	next_rx_seq;
 	__be32		laddr;
 	__be32		faddr;
-	u_int8_t	transport[15];		/* null term ascii */
+	u_int8_t	transport[TRANSNAMSIZ];		/* null term ascii */
 	u_int8_t	flags;
 } __attribute__((packed));
 

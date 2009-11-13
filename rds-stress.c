@@ -2644,7 +2644,7 @@ int main(int argc, char **argv)
 	while(1) {
 		int c, index;
 
-		c = getopt_long(argc, argv, "+a:cD:d:hM:Op:q:Rr:s:t:T:U:vVz",
+		c = getopt_long(argc, argv, "+a:cD:d:hI:M:op:q:Rr:s:t:T:vVz",
 				long_options, &index);
 		if (c == -1)
 			break;

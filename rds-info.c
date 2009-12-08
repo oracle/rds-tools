@@ -47,7 +47,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "net/rds.h"
+#include "rds.h"
 #include "rdstool.h"
 
 #define rds_conn_flag(conn, flag, letter) \

@@ -48,7 +48,7 @@
 #include <sys/poll.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include "net/rds.h"
+#include "rds.h"
 
 #ifdef DYNAMIC_PF_RDS
 #include "pfhack.h"

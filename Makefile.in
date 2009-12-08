@@ -6,10 +6,11 @@ incdir		= $(DESTDIR)@includedir@
 
 all: all-programs
 
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -Iinclude
 CPPFLAGS = -DDEBUG_EXE -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
-HEADERS = kernel-list.h rdstool.h pfhack.h net/rds.h net/ib_rds.h
+HEADERS = kernel-list.h rdstool.h pfhack.h include/rds.h include/linux-rds.h \
+	include/rds-v1.h
 COMMON_SOURCES = options.c stats.c pfhack.c
 SOURCES = $(addsuffix .c,$(PROGRAMS)) $(COMMON_SOURCES)
 CLEAN_OBJECTS = $(addsuffix .o,$(PROGRAMS)) $(subst .c,.o,$(COMMON_SOURCES))
@@ -36,7 +37,7 @@ install: $(PROGRAMS)
 	install -m 644 *.1 $(mandir)/man1
 	install -m 644 *.7 $(mandir)/man7
 	install -d $(incdir)/net
-	install -m 444 net/rds.h $(incdir)/net
+	install -m 444 include/rds.h $(incdir)/net
 
 clean:
 	rm -f $(PROGRAMS) $(CLEAN_OBJECTS)

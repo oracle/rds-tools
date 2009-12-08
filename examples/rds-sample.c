@@ -29,7 +29,7 @@
 /* FIXME - this is a hack to getaround RDS not exporting any header files.
  * This is a local copy of the file found at net/rds/
  */
-#include "ib_rds.h"
+#include "rds.h"
 /* These are defined in rds.h....but that file is not happily included */
 #define SOL_RDS		272
 #define PF_RDS		28

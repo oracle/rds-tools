@@ -31,8 +31,8 @@
  *
  */
 
-#ifndef IB_RDS_H
-#define IB_RDS_H
+#ifndef _LINUX_RDS_H
+#define _LINUX_RDS_H
 
 #include <linux/types.h>
 
@@ -56,6 +56,7 @@
 /* deprecated: RDS_BARRIER 4 */
 #define RDS_RECVERR			5
 #define RDS_CONG_MONITOR		6
+#define RDS_GET_MR_FOR_DEST		7
 
 /*
  * Control message types for SOL_RDS.
@@ -81,7 +82,10 @@
 #define RDS_CMSG_RDMA_MAP		3
 #define RDS_CMSG_RDMA_STATUS		4
 #define RDS_CMSG_CONG_UPDATE		5
+#define RDS_CMSG_ATOMIC_FADD		6
+#define RDS_CMSG_ATOMIC_CSWP		7
 
+#define RDS_INFO_FIRST			10000
 #define RDS_INFO_COUNTERS		10000
 #define RDS_INFO_CONNECTIONS		10001
 /* 10002 aka RDS_INFO_FLOWS is deprecated */
@@ -91,6 +95,9 @@
 #define RDS_INFO_SOCKETS                10006
 #define RDS_INFO_TCP_SOCKETS            10007
 #define RDS_INFO_IB_CONNECTIONS		10008
+#define RDS_INFO_CONNECTION_STATS	10009
+#define RDS_INFO_IWARP_CONNECTIONS	10010
+#define RDS_INFO_LAST			10010
 
 struct rds_info_counter {
 	u_int8_t	name[32];
@@ -101,7 +108,7 @@ struct rds_info_counter {
 #define RDS_INFO_CONNECTION_FLAG_CONNECTING	0x02
 #define RDS_INFO_CONNECTION_FLAG_CONNECTED	0x04
 
-#define TRANSNAMSIZ     16
+#define TRANSNAMSIZ	16
 
 struct rds_info_connection {
 	u_int64_t	next_tx_seq;
@@ -140,23 +147,23 @@ struct rds_info_socket {
 	__be16		bound_port;
 	__be16		connected_port;
 	u_int32_t	rcvbuf;
-	uint64_t	inum;
+	u_int64_t	inum;
 } __attribute__((packed));
 
 struct rds_info_tcp_socket {
-	__be32		local_addr;
-	__be16		local_port;
-	__be32		peer_addr;
-	__be16		peer_port;
-	u_int64_t	hdr_rem;
-	u_int64_t	data_rem;
-	u_int32_t	last_sent_nxt;
-	u_int32_t	last_expected_una;
-	u_int32_t	last_seen_una;
+	__be32          local_addr;
+	__be16          local_port;
+	__be32          peer_addr;
+	__be16          peer_port;
+	u_int64_t       hdr_rem;
+	u_int64_t       data_rem;
+	u_int32_t       last_sent_nxt;
+	u_int32_t       last_expected_una;
+	u_int32_t       last_seen_una;
 } __attribute__((packed));
 
 #define RDS_IB_GID_LEN	16
-struct rds_info_ib_connection {
+struct rds_info_rdma_connection {
 	__be32		src_addr;
 	__be32		dst_addr;
 	uint8_t		src_gid[RDS_IB_GID_LEN];
@@ -165,8 +172,8 @@ struct rds_info_ib_connection {
 	uint32_t	max_send_wr;
 	uint32_t	max_recv_wr;
 	uint32_t	max_send_sge;
-	uint32_t	rdma_fmr_max;
-	uint32_t	rdma_fmr_size;
+	uint32_t	rdma_mr_max;
+	uint32_t	rdma_mr_size;
 };
 
 /*
@@ -220,6 +227,13 @@ struct rds_get_mr_args {
 	uint64_t	flags;
 };
 
+struct rds_get_mr_for_dest_args {
+	struct sockaddr_storage	dest_addr;
+	struct rds_iovec 	vec;
+	u_int64_t		cookie_addr;
+	uint64_t		flags;
+};
+
 struct rds_free_mr_args {
 	rds_rdma_cookie_t cookie;
 	u_int64_t	flags;
@@ -230,6 +244,16 @@ struct rds_rdma_args {
 	struct rds_iovec remote_vec;
 	u_int64_t	local_vec_addr;
 	u_int64_t	nr_local;
+	u_int64_t	flags;
+	u_int64_t	user_token;
+};
+
+struct rds_atomic_args {
+	rds_rdma_cookie_t cookie;
+	uint64_t 	local_addr;
+	uint64_t 	remote_addr;
+	uint64_t	swap_add;
+	uint64_t	compare;
 	u_int64_t	flags;
 	u_int64_t	user_token;
 };

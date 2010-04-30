@@ -2358,7 +2358,7 @@ static int active_parent(struct options *opts, struct soak_control *soak_arr)
 	verify_option_encdec(opts);
 
 	sin.sin_family = AF_INET;
-	sin.sin_port = htons(opts->starting_port);
+	sin.sin_port = htons(0);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
 
 	fd = bound_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sin);

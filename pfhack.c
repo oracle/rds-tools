@@ -58,16 +58,6 @@
 #define PF_RDS_PATH	"/proc/sys/net/rds/pf_rds"
 #define SOL_RDS_PATH	"/proc/sys/net/rds/sol_rds"
 
-/* We don't allow any system that can't read pf_rds */
-static void explode(const char *reason)
-{
-	fprintf(stderr,
-	       	"%s: Unable to determine RDS constant: %s\n",
-	       	progname, reason);
-
-	exit(1);
-}
-
 static int discover_constant(const char *path, int official, int *found)
 {
 	int fd;
@@ -98,12 +88,11 @@ static int discover_constant(const char *path, int official, int *found)
 
 	close(fd);
 
-	if (ret < 0)
-		explode("Error reading address constant");
-
 	val = strtoul(buf, &ptr, 0);
-	if ((val > INT_MAX) || !ptr || (*ptr && (*ptr != '\n')))
-		explode("Invalid address constant");
+	if ((val > INT_MAX) || !ptr || (*ptr && (*ptr != '\n'))) {
+		fprintf(stderr, "Unable to determine RDS constant: invalid address constant\n");
+		exit(1);
+	}
 
 	*found = val;
 	return (int)val;

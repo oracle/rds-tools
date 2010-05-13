@@ -69,6 +69,8 @@
 
 static int	opt_verbose = 0;
 
+char *progname = "rds-info";
+
 /* Like inet_ntoa, but can be re-entered several times without clobbering
  * the previously returned string. */
 static const char *paddr(int af, const void *addrp)

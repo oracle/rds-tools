@@ -382,8 +382,3 @@ parse_addr(const char *ptr, struct in_addr *ret)
 	return 0;
 }
 
-/*
- * This are completely stupid.  options.c should be removed.
- */
-void print_usage(int durr) { }
-void print_version() { }

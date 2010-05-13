@@ -240,7 +240,7 @@ struct info infos[] = {
 		  print_ib_conns, NULL, 0 },
 };
 
-void print_usage(int rc)
+static void print_usage(int rc)
 {
 	FILE *output = rc ? stderr : stdout;
 	int i;

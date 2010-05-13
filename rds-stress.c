@@ -2783,8 +2783,3 @@ int main(int argc, char **argv)
 	return active_parent(&opts, soak_arr);
 }
 
-/*
- * This are completely stupid.  options.c should be removed.
- */
-void print_usage(int durr) { }
-void print_version() { }

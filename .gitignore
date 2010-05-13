@@ -3,9 +3,7 @@
 *.o
 
 # Binaries
-rds-gen
 rds-info
-rds-sink
 rds-stress
 rds-ping
 

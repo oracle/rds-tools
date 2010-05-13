@@ -25,7 +25,7 @@ else
 COMMON_OBJECTS = $(subst .c,.o,$(filter-out pfhack.c,$(COMMON_SOURCES)))
 endif
 
-PROGRAMS = rds-gen rds-sink rds-info rds-stress rds-ping
+PROGRAMS = rds-info rds-stress rds-ping
 
 all-programs: $(PROGRAMS)
 
@@ -63,8 +63,6 @@ TAR_PREFIX := rds-tools-$(VERSION)-$(RELEASE)
 TAR_FILE := $(TAR_PREFIX).tar.gz
 
 EXTRA_DIST := 	rds-info.1 \
-		rds-gen.1 \
-		rds-sink.1 \
 		rds-stress.1 \
 		rds-ping.1 \
 		rds.7 \

@@ -44,17 +44,11 @@
 #ifndef __PF_HACK_H
 #define __PF_HACK_H
 
-#define OFFICIAL_PF_RDS		21
-#define OFFICIAL_SOL_RDS	276
+#define PF_RDS		21
+#define AF_RDS		21
+#define SOL_RDS		276
 
-
-#ifdef DYNAMIC_PF_RDS
 extern int discover_pf_rds();
 extern int discover_sol_rds();
-
-#define AF_RDS discover_pf_rds()
-#define PF_RDS AF_RDS
-#define SOL_RDS discover_sol_rds()
-#endif  /* DYNAMIC_PF_RDS */
 
 #endif  /* __PF_HACK_H */

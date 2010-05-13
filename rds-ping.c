@@ -50,9 +50,7 @@
 #include <getopt.h>
 #include "rds.h"
 
-#ifdef DYNAMIC_PF_RDS
 #include "pfhack.h"
-#endif
 
 #define die(fmt...) do {		\
 	fprintf(stderr, fmt);		\
@@ -257,11 +255,17 @@ rds_socket(struct in_addr *src, struct in_addr *dst)
 {
 	struct sockaddr_in sin;
 	int fd;
+	int pf;
 
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 
-	fd = socket(PF_RDS, SOCK_SEQPACKET, 0);
+#ifdef DYNAMIC_PF_RDS
+        pf = discover_pf_rds();
+#else
+        pf = PF_RDS;
+#endif
+	fd = socket(pf, SOCK_SEQPACKET, 0);
 	if (fd < 0)
 		die_errno("unable to create RDS socket");
 

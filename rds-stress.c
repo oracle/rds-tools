@@ -25,9 +25,7 @@
 #include <byteswap.h>
 #include "rds.h"
 
-#ifdef DYNAMIC_PF_RDS
 #include "pfhack.h"
-#endif
 
 /*
  *
@@ -198,6 +196,10 @@ static unsigned long	sys_page_size;
    with gcc, that is.
  */
 #define ptr64(p)	((unsigned long) (p))
+
+/* need vars as long as dynamic vals are possible */
+int pf = PF_RDS;
+int sol = SOL_RDS;
 
 /* zero is undefined */
 static inline uint64_t minz(uint64_t a, uint64_t b)
@@ -528,7 +530,7 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 	int val;
 	socklen_t optlen;
 
-	fd = bound_socket(PF_RDS, SOCK_SEQPACKET, 0, sin);
+	fd = bound_socket(pf, SOCK_SEQPACKET, 0, sin);
 
 	bytes = opts->nr_tasks * opts->req_depth *
 		(opts->req_size + opts->ack_size) * 2;
@@ -584,7 +586,7 @@ static int check_rdma_support(struct options *opts)
 	sin.sin_port = htons(opts->starting_port);
 	sin.sin_addr.s_addr = htonl(opts->receive_addr);
 
-	fd = bound_socket(AF_RDS, SOCK_SEQPACKET, 0, &sin);
+	fd = bound_socket(pf, SOCK_SEQPACKET, 0, &sin);
 
 	memset(&args, 0, sizeof(args));
 	if (setsockopt(fd, SOL_RDS, RDS_FREE_MR, &args, sizeof(args)) >= 0) {
@@ -1899,14 +1901,14 @@ get_perfdata(int initialize)
 	int i, count, item_size;
 
 	if (sock_fd < 0) {
-		sock_fd = socket(PF_RDS, SOCK_SEQPACKET, 0);
+		sock_fd = socket(pf, SOCK_SEQPACKET, 0);
 		if (sock_fd < 0)
 			die_errno("Unable to create socket");
 	}
 
 	/* We should only loop once on the first call; after that the
 	 * buffer requirements for RDS counters should not change. */
-	while ((item_size = getsockopt(sock_fd, SOL_RDS, RDS_INFO_COUNTERS, curr, &buflen)) < 0) {
+	while ((item_size = getsockopt(sock_fd, sol, RDS_INFO_COUNTERS, curr, &buflen)) < 0) {
 		if (errno != ENOSPC)
 			die_errno("getsockopt(RDS_INFO_COUNTERS) failed");
 		curr = realloc(curr, buflen);
@@ -2602,9 +2604,8 @@ int main(int argc, char **argv)
 	struct soak_control *soak_arr = NULL;
 
 #ifdef DYNAMIC_PF_RDS
-	/* Discover PF_RDS/SOL_RDS once, and be done with it */
-	(void) discover_pf_rds();
-	(void) discover_sol_rds();
+	pf = discover_pf_rds();
+	sol = discover_sol_rds();
 #endif
 
 #ifdef _SC_PAGESIZE

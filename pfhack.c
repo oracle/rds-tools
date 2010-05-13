@@ -53,7 +53,6 @@
 
 #include "kernel-list.h"
 #include "pfhack.h"
-#include "rdstool.h"
 
 #define PF_RDS_PATH	"/proc/sys/net/rds/pf_rds"
 #define SOL_RDS_PATH	"/proc/sys/net/rds/sol_rds"
@@ -102,12 +101,12 @@ int discover_pf_rds()
 {
 	static int	pf_rds = -1;
 
-	return discover_constant(PF_RDS_PATH, OFFICIAL_PF_RDS, &pf_rds);
+	return discover_constant(PF_RDS_PATH, PF_RDS, &pf_rds);
 }
 
 int discover_sol_rds()
 {
 	static int	sol_rds = -1;
 
-	return discover_constant(SOL_RDS_PATH, OFFICIAL_SOL_RDS, &sol_rds);
+	return discover_constant(SOL_RDS_PATH, SOL_RDS, &sol_rds);
 }

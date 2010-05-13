@@ -48,7 +48,7 @@
 #include <arpa/inet.h>
 
 #include "rds.h"
-#include "rdstool.h"
+#include "pfhack.h"
 
 #define rds_conn_flag(conn, flag, letter) \
 	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
@@ -66,6 +66,11 @@
 #define for_each(var, data, each, len) 			\
 	for (;len > 0 && copy_into(var, data, each);	\
 	     data += each, len -= min(len, each))
+
+#define verbosef(lvl, f, fmt, a...) do { \
+        if (opt_verbose >= (lvl)) \
+                fprintf((f), fmt, ##a); \
+} while (0)
 
 static int	opt_verbose = 0;
 
@@ -254,10 +259,6 @@ void print_usage(int rc)
 	exit(rc);
 }
 
-void print_version()
-{
-}
-
 int main(int argc, char **argv)
 {
 	char optstring[258] = "v+";
@@ -269,6 +270,7 @@ int main(int argc, char **argv)
 	int c;
 	char *last;
 	int i;
+	int pf;
 
 	/* quickly append all our info options to the optstring */
 	last = &optstring[strlen(optstring)];
@@ -297,7 +299,12 @@ int main(int argc, char **argv)
 		given_options++;
 	}
 
-	fd = socket(PF_RDS, SOCK_SEQPACKET, 0);
+#ifdef DYNAMIC_PF_RDS
+	pf = discover_pf_rds();
+#else
+	pf = PF_RDS;
+#endif
+	fd = socket(pf, SOCK_SEQPACKET, 0);
 	if (fd < 0) {
 		verbosef(0, stderr, "%s: Unable to create socket: %s\n",
 			 progname, strerror(errno));

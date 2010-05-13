@@ -106,32 +106,9 @@ static void print_counters(void *data, int each, socklen_t len, void *extra)
 		printf("%25s %16"PRIu64"\n", ctr.name, ctr.value);
 }
 
-static void print_sockets_v1(void *data, int each, socklen_t len, void *extra)
-{
-	struct rds_info_socket_v1 sk;
-
-	printf("\nRDS Sockets:\n%15s %5s %15s %5s %10s %10s\n",
-		"BoundAddr", "BPort", "ConnAddr", "CPort", "SndBuf",
-		"RcvBuf");
-	
-	for_each(sk, data, each, len) {
-		printf("%15s %5u %15s %5u %10u %10u\n",
-			ipv4addr(sk.bound_addr),
-			ntohs(sk.bound_port),
-			ipv4addr(sk.connected_addr),
-			ntohs(sk.connected_port),
-			sk.sndbuf, sk.rcvbuf);
-	}
-}
-
 static void print_sockets(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_socket sk;
-
-	if (each == sizeof(struct rds_info_socket_v1)) {
-		print_sockets_v1(data, each, len, extra);
-		return;
-	}
 
 	printf("\nRDS Sockets:\n%15s %5s %15s %5s %10s %10s %8s\n",
 		"BoundAddr", "BPort", "ConnAddr", "CPort", "SndBuf",

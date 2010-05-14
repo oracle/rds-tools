@@ -58,7 +58,7 @@ endif
 VERSION := @VERSION@
 RELEASE := @RELEASE@
 
-TAR_PREFIX := rds-tools-$(VERSION)-$(RELEASE)
+TAR_PREFIX := rds-tools-$(VERSION)
 TAR_FILE := $(TAR_PREFIX).tar.gz
 
 EXTRA_DIST := 	rds-info.1 \

@@ -2153,12 +2153,13 @@ static void release_children_and_wait(struct options *opts,
 
 		scale = 1e6 / usec_sub(&last_ts, &first_ts);
 
-		printf("%4u %6lu %10.2f %10.2f %10.2f %7.2f %8.2f %5.2f  (average)\n",
+		printf("%4u %6lu %6lu %10.2f %10.2f %10.2f %7.2f %8.2f %5.2f  (average)\n",
 			opts->nr_tasks,
 			(long) (scale * summary[S_REQ_TX_BYTES].nr),
+			(long) (scale * summary[S_REQ_RX_BYTES].nr),
 			scale * throughput(summary) / 1024.0,
-			scale * throughput_mbi(disp) / 1024.0,
-			scale * throughput_mbo(disp) / 1024.0,
+			scale * throughput_mbi(summary) / 1024.0,
+			scale * throughput_mbo(summary) / 1024.0,
 			avg(&summary[S_SENDMSG_USECS]),
 			avg(&summary[S_RTT_USECS]),
 			soak_arr? scale * cpu_total : -1.0);

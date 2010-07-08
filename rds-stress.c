@@ -558,7 +558,7 @@ static int rds_socket(struct options *opts, struct sockaddr_in *sin)
 
 	val = 1;
 	if (opts->use_cong_monitor
-	 && setsockopt(fd, SOL_RDS, RDS_CONG_MONITOR, &val, sizeof(val))) {
+	 && setsockopt(fd, sol, RDS_CONG_MONITOR, &val, sizeof(val))) {
 		if (errno != ENOPROTOOPT)
 			die_errno("setsockopt(RDS_CONG_MONITOR) failed");
 		printf("Kernel does not support congestion monitoring; disabled\n");
@@ -589,7 +589,7 @@ static int check_rdma_support(struct options *opts)
 	fd = bound_socket(pf, SOCK_SEQPACKET, 0, &sin);
 
 	memset(&args, 0, sizeof(args));
-	if (setsockopt(fd, SOL_RDS, RDS_FREE_MR, &args, sizeof(args)) >= 0) {
+	if (setsockopt(fd, sol, RDS_FREE_MR, &args, sizeof(args)) >= 0) {
 		okay = 1;
 	} else if (errno == ENOPROTOOPT) {
 		okay = 0;
@@ -614,7 +614,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size)
 	if (opt.rdma_use_once)
 		mr_args.flags |= RDS_RDMA_USE_ONCE;
 
-	if (setsockopt(fd, SOL_RDS, RDS_GET_MR, &mr_args, sizeof(mr_args)))
+	if (setsockopt(fd, sol, RDS_GET_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_GET_MR) failed (%u allocated)", mrs_allocated);
 
 	trace("RDS get_rdma_key() = %Lx\n",
@@ -636,7 +636,7 @@ static void free_rdma_key(int fd, uint64_t key)
 #else
 	mr_args.flags = RDS_FREE_MR_ARGS_INVALIDATE;
 #endif
-	if (setsockopt(fd, SOL_RDS, RDS_FREE_MR, &mr_args, sizeof(mr_args)))
+	if (setsockopt(fd, sol, RDS_FREE_MR, &mr_args, sizeof(mr_args)))
 		die_errno("setsockopt(RDS_FREE_MR) failed");
 	mrs_allocated--;
 }
@@ -1020,7 +1020,7 @@ static void rdma_put_cmsg(struct msghdr *msg, int type,
 	msg->msg_controllen = CMSG_SPACE(size);
 
 	cmsg = CMSG_FIRSTHDR(msg);
-	cmsg->cmsg_level = SOL_RDS;
+	cmsg->cmsg_level = sol;
 	cmsg->cmsg_type = type;
 	cmsg->cmsg_len = CMSG_LEN(size);
 	memcpy(CMSG_DATA(cmsg), ptr, size);
@@ -1405,7 +1405,7 @@ static int recv_message(int fd,
 	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
 		struct rds_rdma_notify notify;
 
-		if (cmsg->cmsg_level != SOL_RDS)
+		if (cmsg->cmsg_level != sol)
 			continue;
 		switch (cmsg->cmsg_type) {
 		case RDS_CMSG_CONG_UPDATE:

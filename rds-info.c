@@ -271,6 +271,7 @@ int main(int argc, char **argv)
 	char *last;
 	int i;
 	int pf;
+	int sol;
 
 	/* quickly append all our info options to the optstring */
 	last = &optstring[strlen(optstring)];
@@ -301,8 +302,10 @@ int main(int argc, char **argv)
 
 #ifdef DYNAMIC_PF_RDS
 	pf = discover_pf_rds();
+	sol = discover_sol_rds();
 #else
 	pf = PF_RDS;
+	sol = SOL_RDS;
 #endif
 	fd = socket(pf, SOCK_SEQPACKET, 0);
 	if (fd < 0) {
@@ -318,7 +321,7 @@ int main(int argc, char **argv)
 			continue;
 
 		/* read in the info until we get a full snapshot */
-		while ((each = getsockopt(fd, SOL_RDS, infos[i].opt_val, data,
+		while ((each = getsockopt(fd, sol, infos[i].opt_val, data,
 				   &len)) < 0) {
 			if (errno != ENOSPC) {
 				verbosef(0, stderr,

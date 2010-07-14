@@ -1564,6 +1564,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	/* give main display thread a little edge? */
 	nice(5);
 
+	/* send to *all* remote tasks */
 	memset(tasks, 0, sizeof(tasks));
 	for (i = 0; i < opts->nr_tasks; i++) {
 		tasks[i].nr = i;
@@ -2415,6 +2416,8 @@ static int passive_parent(uint32_t addr, uint16_t port,
 	sin.sin_addr.s_addr = htonl(addr);
 
 	lfd = bound_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sin);
+
+	printf("waiting for incoming connection on %s:%d\n", inet_ntoa(sin.sin_addr), port);
 
 	if (listen(lfd, 255))
 		die_errno("listen() failed");

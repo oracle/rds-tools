@@ -498,14 +498,14 @@ static int bound_socket(int domain, int type, int protocol,
 			struct sockaddr_in *sin)
 {
 	int fd;
-	int opt;
+	int sockopt;
 
 	fd = socket(domain, type, protocol);
 	if (fd < 0)
 		die_errno("socket(%d, %d, %d) failed", domain, type, protocol);
 
-	opt = 1;
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
+	sockopt = 1;
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt)))
 		die_errno("setsockopt(SO_REUSEADDR) failed");
 
 	if (bind(fd, (struct sockaddr *)sin, sizeof(struct sockaddr_in)))
@@ -2549,10 +2549,10 @@ void stop_soakers(struct soak_control *soak_arr)
 }
 
 void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
-		char *opt)
+		char *option)
 {
 	if (size == ~0)
-		die("specify %s with %s\n", desc, opt);
+		die("specify %s with %s\n", desc, option);
 	if (size < max)
 		die("%s must be at least %u bytes\n", desc, max);
 }

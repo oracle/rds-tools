@@ -257,7 +257,9 @@ static uint32_t parse_addr(char *ptr)
 
 static void usage(void)
 {
-	printf(
+        fprintf(stderr, "rds-stress version %s\n", RDS_VERSION);
+
+	fprintf(stderr,
 	"\n"
 	"Send & Recv parameters:\n"
 	" -r [addr]         use this local address\n"

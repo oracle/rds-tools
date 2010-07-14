@@ -245,6 +245,8 @@ static void print_usage(int rc)
 	FILE *output = rc ? stderr : stdout;
 	int i;
 
+	fprintf(stderr, "rds-info version %s\n", RDS_VERSION);
+
 	verbosef(0, output, "The following options limit output to the given "
 		 "sources:\n");
 

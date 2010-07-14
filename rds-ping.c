@@ -303,6 +303,8 @@ rds_socket(struct in_addr *src, struct in_addr *dst)
 static void
 usage(const char *complaint)
 {
+        fprintf(stderr, "rds-ping version %s\n", RDS_VERSION);
+
 	fprintf(stderr,
 		"%s\nUsage: rds-ping [options] dst_addr\n"
 		"Options:\n"

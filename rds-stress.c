@@ -1211,7 +1211,8 @@ static int send_packet(int fd, struct task *t,
 			/* Use the RDMA_MAP cmsg to have sendmsg do the
 			 * mapping on the fly. */
 			rdma_build_cmsg_map(&msg, hdr->rdma_addr,
-					hdr->rdma_size, &cookie);
+					    hdr->rdma_size * hdr->rdma_vector,
+					    &cookie);
 		}
 	}
 

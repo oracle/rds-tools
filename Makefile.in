@@ -72,8 +72,6 @@ EXTRA_DIST := 	rds-info.1 \
 		configure \
 		README \
 		rds-tools.txt \
-		stap/rds.stp \
-		stap/README \
 		docs/rds-architecture.txt \
 		examples/Makefile \
 		examples/rds-sample.c \

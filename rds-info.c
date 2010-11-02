@@ -50,8 +50,11 @@
 #include "rds.h"
 #include "pfhack.h"
 
+/* WHUPS changed the struct rds_info_connection definition b/w rds in 1.4 & 1.5. gotta support both
+   for now. TODO remove check of transport[15] once ofed pre-1.5 is extinct. */
 #define rds_conn_flag(conn, flag, letter) \
-	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
+	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag \
+	|| conn.transport[15] & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
 
 #define min(a, b) (a < b ? a : b)
 #define array_size(foo) (sizeof(foo) / sizeof(foo[0]))

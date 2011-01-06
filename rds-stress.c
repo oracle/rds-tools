@@ -110,6 +110,7 @@ enum {
 struct child_control {
 	pid_t pid;
 	int ready;
+	int stopping;
 	struct timeval start;
 	struct counter cur[NR_STATS];
 	struct counter last[NR_STATS];
@@ -1625,6 +1626,10 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				;
 		}
 
+		/* stop sending if in shutdown phase */
+		if (ctl->stopping)
+			continue;
+
 		/* keep the pipeline full */
 		can_send = !!(pfd.revents & POLLOUT);
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
@@ -2139,6 +2144,11 @@ static void release_children_and_wait(struct options *opts,
 	control_fd = -1;
 
 	if (nr_running) {
+		/* let everything gracefully stop before we kill the chillins */
+		for (i = 0; i < opts->nr_tasks; i++)
+			ctl[i].stopping = 1;
+		sleep(1);
+
 		for (i = 0; i < opts->nr_tasks; i++)
 			kill(ctl[i].pid, SIGTERM);
 		stop_soakers(soak_arr);

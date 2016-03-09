@@ -10,6 +10,7 @@
 .Op Fl v
 .Bk -words
 .Op Fl cknrstIT
+.Op Fl Fl E
 
 .Sh DESCRIPTION
 The
@@ -30,6 +31,9 @@ will display additional data.
 Display global counters.  Each counter increments as its event
 occurs.  The counters may not be reset.  The set of supported counters
 may change over time.
+
+.It Fl Fl E
+Indicates pending failed notifications. The connection is not open for traffic until all pending failed notifications have been reaped.
 
 .Bl -tag -width 4
 .It CounterName

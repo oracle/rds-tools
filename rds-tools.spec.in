@@ -45,6 +45,48 @@ rm -rf $RPM_BUILD_ROOT
 %doc docs examples
 
 %changelog
+* Mon Mar 21 2016 Santosh Shilimkar <santosh.shilimkar@oracle.com>
+- Source code syncup with latest shipping rds-tools
+
+* Tue Mar 01 2016 Qing Huang <qing.huang@oracle.com> - 2.0.7-1.16
+- Consolidate changes from x86 and sparc [orabug: 22862753]
+
+* Thu Oct 27 2015 Wengang Wang - 2.0.7-1.15
+- Correct SOL_RDS & PF_RDS in rds-sample [orabug: 22190972]
+
+* Tue Oct 27 2015 Shamir Rabinovitch <shamir.rabinovitch@oracle.com> - 2.0.7-1.14
+- Orabug: 21873217
+
+* Mon Oct 26 2015 Lidza Louina <lidza.louina@oracle.com> - 2.0.7-1.13.el5
+- Adds --async to rds-stress manpage and --E to rds-info manpage.
+
+* Fri Sep 13 2013 Bang Nguyen - 2.0.7-1.12.el5
+- Support backward compatibility (2.0.7 <-> 2.0.6)
+
+* Mon Aug 12 2013 Chien-Hua Yen <chien.eyn@oracle.com> - 2.0.7-1.11.el5
+- Add rds-devel rpm
+
+* Thu Jul 18 2013 Bang Nguyen - 2.0.7-1.10.el5
+- Don't check for msg_namelen for Control msgs
+
+* Tue Jun 25 2013 Bang Nguyen - 2.0.7-1.9.el5
+- Fix stuck rds-ping
+
+* Thu Jun  6 2013 Bang Nguyen - 2.0.7-1.8.el5
+- Wait for PONG on initial PING
+
+* Wed May 29 2013 Joe Jin - 2.0.7-1.7.el5
+- Don't show histogram data if no --show-histogram [orabug 16870737]
+
+* Thu Mar 21 2013 Bang Nguyen - 2.0.7-1.6.el5
+- Remove rds.conf
+
+* Tue Feb 26 2013 Bang Nguyen - 2.0.7-1.5.el5
+- Remove RDS_RDMA_REMOTE_COMPLETE
+
+* Fri Feb 22 2013 Bang Nguyen - 2.0.7-1.3.el5
+- support QoS, Async send, connection reset and etc.
+
 * Sun Nov 25 2007 Vladimir Sokolovsky <vlad@mellanox.co.il>
 - Use DESTDIR
 * Mon Oct 27 2006 Zach Brown <zach.brown@oracle.com>

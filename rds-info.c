@@ -137,18 +137,20 @@ static void print_conns(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_connection conn;
 
-	printf("\nRDS Connections:\n%15s %15s %16s %16s %3s\n",
-		"LocalAddr", "RemoteAddr", "NextTX", "NextRX", "Flg");
+	printf("\nRDS Connections:\n%15s %15s %4s %16s %16s %4s\n",
+		"LocalAddr", "RemoteAddr", "Tos", "NextTX", "NextRX", "Flgs");
 	
 	for_each(conn, data, each, len) {
-		printf("%15s %15s %16"PRIu64" %16"PRIu64" %c%c%c\n",
+		printf("%15s %15s %4u %16"PRIu64" %16"PRIu64" %c%c%c%c\n",
 			ipv4addr(conn.laddr),
 			ipv4addr(conn.faddr),
+			conn.tos,
 			conn.next_tx_seq,
 			conn.next_rx_seq,
 			rds_conn_flag(conn, SENDING, 's'),
 			rds_conn_flag(conn, CONNECTING, 'c'),
-			rds_conn_flag(conn, CONNECTED, 'C'));
+			rds_conn_flag(conn, CONNECTED, 'C'),
+			rds_conn_flag(conn, ERROR, 'E'));
 	}
 }
 
@@ -156,16 +158,17 @@ static void print_msgs(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_message msg;
 
-	printf("\n%s Message Queue:\n%15s %5s %15s %5s %16s %10s\n",
+	printf("\n%s Message Queue:\n%15s %5s %15s %5s %4s %16s %10s\n",
 		(char *)extra,
-		"LocalAddr", "LPort", "RemoteAddr", "RPort", "Seq", "Bytes");
+		"LocalAddr", "LPort", "RemoteAddr", "RPort", "Tos","Seq", "Bytes");
 	
 	for_each(msg, data, each, len) {
-		printf("%15s %5u %15s %5u %16"PRIu64" %10u\n",
+		printf("%15s %5u %15s %5u %4u %16"PRIu64" %10u\n",
 			ipv4addr(msg.laddr),
 			ntohs(msg.lport),
 			ipv4addr(msg.faddr),
 			ntohs(msg.fport),
+			msg.tos,
 			msg.seq, msg.len);
 	}
 }
@@ -194,13 +197,14 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
 {
 	struct rds_info_rdma_connection ic;
 
-	printf("\nRDS IB Connections:\n%15s %15s %32s %32s\n",
-		"LocalAddr", "RemoteAddr", "LocalDev", "RemoteDev");
+	printf("\nRDS IB Connections:\n%15s %15s %4s %3s %32s %32s\n",
+		"LocalAddr", "RemoteAddr", "Tos", "SL", "LocalDev", "RemoteDev");
 
 	for_each(ic, data, each, len) {
-		printf("%15s %15s %32s %32s",
+		printf("%15s %15s %4u %3u %32s %32s",
 			ipv4addr(ic.src_addr),
 			ipv4addr(ic.dst_addr),
+			ic.tos,ic.sl,
 			ipv6addr(ic.src_gid),
 			ipv6addr(ic.dst_gid));
 
@@ -210,6 +214,7 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
 			printf(", send_sge=%u", ic.max_send_sge);
 			printf(", rdma_mr_max=%u", ic.rdma_mr_max);
 			printf(", rdma_mr_size=%u", ic.rdma_mr_size);
+			printf(", cache_allocs=%u", ic.cache_allocs);
 		}
 
 		printf("\n");

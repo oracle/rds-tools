@@ -31,8 +31,14 @@
  */
 #include "rds.h"
 /* These are defined in rds.h....but that file is not happily included */
-#define SOL_RDS		272
-#define PF_RDS		28
+#ifndef SOL_RDS
+#define SOL_RDS		276
+#endif /* SOL_RDS */
+
+
+#ifndef PF_RDS
+#define PF_RDS		21
+#endif /* PF_RDS */
 
 
 #define TESTPORT	4000

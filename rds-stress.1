@@ -20,6 +20,7 @@
 .Op Fl R
 .Op Fl V
 .Op Fl v
+.Op Fl Fl async
 
 .Sh DESCRIPTION
 .Nm rds-stress
@@ -130,6 +131,9 @@ the parent, and skewing the results.
 With this option enabled, packets are filled with a pattern that is
 verified by the receiver. This check can help detect data corruption
 occuring under high load.
+.It Fl Fl async
+Submit all sends (bcopy/acopy) as async. On failure, rds-stress re-submits the sends in the same order as they were submitted.
+
 .El
 .Pp
 

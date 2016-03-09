@@ -48,6 +48,7 @@
 #include <sys/poll.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <sys/ioctl.h>
 #include "rds.h"
 
 #include "pfhack.h"
@@ -67,13 +68,14 @@ static struct timeval	opt_wait = { 1, 1 };		/* 1s */
 static unsigned long	opt_count;
 static struct in_addr	opt_srcaddr;
 static struct in_addr	opt_dstaddr;
+static unsigned long	opt_tos = 0;
 
 /* For reasons of simplicity, RDS ping does not use a packet
  * payload that is being echoed, the way ICMP does.
  * Instead, we open a number of sockets on different ports, and
  * match packet sequence numbers with ports.
  */
-#define NSOCKETS	8
+#define NSOCKETS	8	
 
 struct socket {
 	int fd;
@@ -97,7 +99,7 @@ main(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "c:i:I:")) != -1) {
+	while ((c = getopt(argc, argv, "c:i:I:Q:")) != -1) {
 		switch (c) {
 		case 'c':
 			if (!parse_long(optarg, &opt_count))
@@ -114,6 +116,10 @@ main(int argc, char **argv)
 				die("Bad wait time <%s>\n", optarg);
 			break;
 
+		case 'Q':
+			if (!parse_long(optarg, &opt_tos))
+				die("Bad tos <%s>\n", optarg);
+			break;
 		default:
 			usage("Unknown option");
 		}
@@ -142,6 +148,7 @@ do_ping(void)
 	struct timeval	next_ts;
 	struct socket	socket[NSOCKETS];
 	struct pollfd	pfd[NSOCKETS];
+	int             pending[NSOCKETS];
 	int		i, next = 0;
 
 	for (i = 0; i < NSOCKETS; ++i) {
@@ -152,6 +159,7 @@ do_ping(void)
 		socket[i].fd = fd;
 		pfd[i].fd = fd;
 		pfd[i].events = POLLIN;
+		pending[i] = 0;
 	}
 
 	memset(&sin, 0, sizeof(sin));
@@ -180,13 +188,21 @@ do_ping(void)
 			if (opt_count && sent >= opt_count)
 				break;
 
-			timeradd(&next_ts, &opt_wait, &next_ts);
-			if (sendto(sp->fd, NULL, 0, 0, (struct sockaddr *) &sin, sizeof(sin)))
-				err = errno;
-			sp->sent_id = ++sent;
-			sp->sent_ts = now;
-			sp->nreplies = 0;
-			next = (next + 1) % NSOCKETS;
+			timeradd(&now, &opt_wait, &next_ts);
+			if (!pending[next]) {
+				memset(&sin, 0, sizeof(sin));
+				sin.sin_family = AF_INET;
+				sin.sin_addr = opt_dstaddr;
+
+				if (sendto(sp->fd, NULL, 0, 0, (struct sockaddr *) &sin, sizeof(sin)))
+					err = errno;
+				sp->sent_id = ++sent;
+				sp->sent_ts = now;
+				sp->nreplies = 0;
+				if (!err)
+					pending[next] = 1;
+				next = (next + 1) % NSOCKETS;
+			}
 
 			if (err) {
 				static unsigned int nerrs = 0;
@@ -223,6 +239,7 @@ do_ping(void)
 					report_packet(sp, &now, NULL, errno);
 			} else {
 				report_packet(sp, &now, &from.sin_addr, 0);
+				pending[i] = 0;
 				recv++;
 			}
 		}
@@ -297,6 +314,9 @@ rds_socket(struct in_addr *src, struct in_addr *dst)
 	if (bind(fd, (struct sockaddr *) &sin, sizeof(sin)))
 		die_errno("bind() failed");
 
+	if (opt_tos && ioctl(fd, SIOCRDSSETTOS, &opt_tos)) 
+		die_errno("ERROR: failed to set TOS\n");
+
 	return fd;
 }
 
@@ -309,7 +329,8 @@ usage(const char *complaint)
 		"%s\nUsage: rds-ping [options] dst_addr\n"
 		"Options:\n"
 		" -c count      limit packet count\n"
-		" -I interface  source IP address\n",
+		" -I interface  source IP address\n"
+		" -Q tos	type of service\n",
 		complaint);
 	exit(1);
 }

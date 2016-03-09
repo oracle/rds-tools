@@ -6,7 +6,7 @@ incdir		= $(DESTDIR)@includedir@
 
 all: all-programs
 
-CFLAGS = -O2 -Wall -Iinclude
+CFLAGS = -O2 -Wall -Iinclude -g
 CPPFLAGS = -DDEBUG_EXE -DRDS_VERSION=\"@VERSION@\" -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
 HEADERS = kernel-list.h pfhack.h include/rds.h
@@ -30,7 +30,7 @@ all-programs: $(PROGRAMS)
 
 install: $(PROGRAMS)
 	install -d $(bindir)
-	install -m 555 -s $(PROGRAMS) $(bindir)
+	install -m 755 $(PROGRAMS) $(bindir)
 	install -d $(mandir)/man1
 	install -d $(mandir)/man7
 	install -m 644 *.1 $(mandir)/man1

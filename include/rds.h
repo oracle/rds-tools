@@ -57,6 +57,17 @@
 #define RDS_RECVERR			5
 #define RDS_CONG_MONITOR		6
 #define RDS_GET_MR_FOR_DEST		7
+#define RDS_CONN_RESET                  8
+
+/*
+    * ioctl commands for SQL_RDS
+    */
+#define SIOCRDSSETTOS                   (SIOCPROTOPRIVATE)
+
+#define RDS_MAX_TOS                     15
+
+typedef u_int8_t         rds_tos_t;
+
 
 /*
  * Control message types for SOL_RDS.
@@ -80,12 +91,13 @@
 #define RDS_CMSG_RDMA_ARGS		1
 #define RDS_CMSG_RDMA_DEST		2
 #define RDS_CMSG_RDMA_MAP		3
-#define RDS_CMSG_RDMA_STATUS		4
+#define RDS_CMSG_RDMA_SEND_STATUS	4
 #define RDS_CMSG_CONG_UPDATE		5
 #define RDS_CMSG_ATOMIC_FADD		6
 #define RDS_CMSG_ATOMIC_CSWP		7
 #define RDS_CMSG_MASKED_ATOMIC_FADD	8
 #define RDS_CMSG_MASKED_ATOMIC_CSWP	9
+#define RDS_CMSG_ASYNC_SEND             10
 
 #define RDS_INFO_FIRST			10000
 #define RDS_INFO_COUNTERS		10000
@@ -109,6 +121,7 @@ struct rds_info_counter {
 #define RDS_INFO_CONNECTION_FLAG_SENDING	0x01
 #define RDS_INFO_CONNECTION_FLAG_CONNECTING	0x02
 #define RDS_INFO_CONNECTION_FLAG_CONNECTED	0x04
+#define RDS_INFO_CONNECTION_FLAG_ERROR		0x08
 
 #define TRANSNAMSIZ	16
 
@@ -119,6 +132,7 @@ struct rds_info_connection {
 	__be32		faddr;
 	u_int8_t	transport[TRANSNAMSIZ];		/* null term ascii */
 	u_int8_t	flags;
+	u_int8_t	tos;
 } __attribute__((packed));
 
 struct rds_info_flow {
@@ -140,6 +154,7 @@ struct rds_info_message {
 	__be16		lport;
 	__be16		fport;
 	u_int8_t	flags;
+	u_int8_t        tos;
 } __attribute__((packed));
 
 struct rds_info_socket {
@@ -176,6 +191,9 @@ struct rds_info_rdma_connection {
 	uint32_t	max_send_sge;
 	uint32_t	rdma_mr_max;
 	uint32_t	rdma_mr_size;
+	uint8_t		tos;
+	uint8_t		sl;
+	uint32_t	cache_allocs;
 };
 
 /*
@@ -277,16 +295,27 @@ struct rds_atomic_args {
 	u_int64_t	user_token;
 };
 
-struct rds_rdma_notify {
+struct rds_reset {
+	u_int8_t        tos;
+	struct in_addr  src;
+	struct in_addr  dst;
+};
+
+struct rds_asend_args {
+	u_int64_t       user_token;
+	u_int64_t       flags;
+};
+
+struct rds_rdma_send_notify {
 	u_int64_t	user_token;
 	int32_t		status;
 };
 
-#define RDS_RDMA_SUCCESS	0
-#define RDS_RDMA_REMOTE_ERROR	1
-#define RDS_RDMA_CANCELED	2
-#define RDS_RDMA_DROPPED	3
-#define RDS_RDMA_OTHER_ERROR	4
+#define RDS_RDMA_SEND_SUCCESS           0
+#define RDS_RDMA_REMOTE_ERROR           1
+#define RDS_RDMA_SEND_CANCELED          2
+#define RDS_RDMA_SEND_DROPPED           3
+#define RDS_RDMA_SEND_OTHER_ERROR       4
 
 /*
  * Common set of flags for all RDMA related structs
@@ -298,5 +327,7 @@ struct rds_rdma_notify {
 #define RDS_RDMA_DONTWAIT	0x0010	/* Don't wait in SET_BARRIER */
 #define RDS_RDMA_NOTIFY_ME	0x0020	/* Notify when operation completes */
 #define RDS_RDMA_SILENT		0x0040	/* Do not interrupt remote */
+#define RDS_RDMA_REMOTE_COMPLETE 0x0080 /* Notify when data is available */
+#define RDS_SEND_NOTIFY_ME      0x0100  /* Notify when operation completes */
 
 #endif /* IB_RDS_H */

@@ -45,6 +45,9 @@ rm -rf $RPM_BUILD_ROOT
 %doc docs examples
 
 %changelog
+* Tue Jun 07 2016 Guanglei Li <guanglei.li@oracle.com> - 2.0.7-1.17
+- Change rds-stress memory allocation to heap [orabug: 23312910]
+
 * Mon Mar 21 2016 Santosh Shilimkar <santosh.shilimkar@oracle.com>
 - Source code syncup with latest shipping rds-tools
 

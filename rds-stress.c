@@ -1840,21 +1840,67 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		tasks[i].dst_addr.sin_family = AF_INET;
 		tasks[i].dst_addr.sin_addr.s_addr = htonl(opts->send_addr);
 		tasks[i].dst_addr.sin_port = htons(opts->starting_port + 1 + i);
-		tasks[i].send_time = alloca(opts->req_depth * sizeof(struct timeval));
-		tasks[i].rdma_req_key = alloca(opts->req_depth * sizeof(uint64_t));
-		tasks[i].rdma_inflight = alloca(opts->req_depth * sizeof(uint8_t));
-		tasks[i].rdma_buf = alloca(opts->req_depth * sizeof(uint64_t *));
-		tasks[i].local_buf = alloca(opts->req_depth * sizeof(uint64_t *));
-		tasks[i].ack_header = alloca(opts->req_depth * sizeof(struct header));
-		tasks[i].ack2_header = alloca(opts->req_depth * sizeof(struct header));
+
+		tasks[i].send_time = malloc(opts->req_depth * sizeof(struct timeval));
+		if (!tasks[i].send_time) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].send_time, 0, opts->req_depth * sizeof(struct timeval));
+
+		tasks[i].rdma_req_key = malloc(opts->req_depth * sizeof(uint64_t));
+		if (!tasks[i].rdma_req_key) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].rdma_req_key, 0, opts->req_depth * sizeof(uint64_t));
+
+		tasks[i].rdma_inflight = malloc(opts->req_depth * sizeof(uint8_t));
+		if (!tasks[i].rdma_inflight) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].rdma_inflight, 0, opts->req_depth * sizeof(uint8_t));
+
+		tasks[i].rdma_buf = malloc(opts->req_depth * sizeof(uint64_t *));
+		if (!tasks[i].rdma_buf) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].rdma_buf , 0, opts->req_depth * sizeof(uint64_t *));
+
+		tasks[i].local_buf = malloc(opts->req_depth * sizeof(uint64_t *));
+		if (!tasks[i].local_buf) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].local_buf, 0, opts->req_depth * sizeof(uint64_t *));
+
+		tasks[i].ack_header = malloc(opts->req_depth * sizeof(struct header));
+		if (!tasks[i].ack_header) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].ack_header, 0, opts->req_depth * sizeof(struct header));
+
+		tasks[i].ack2_header = malloc(opts->req_depth * sizeof(struct header));
+		if (!tasks[i].ack2_header) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].ack2_header, 0, opts->req_depth * sizeof(struct header));
+
 		for (j=0;j<opts->req_depth;j++)
 			tasks[i].ack2_header[j].pending = 0;
 
-		tasks[i].req_header = alloca(opts->req_depth * sizeof(struct header));
+		tasks[i].req_header = malloc(opts->req_depth * sizeof(struct header));
+		if (!tasks[i].req_header) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].req_header, 0, opts->req_depth * sizeof(struct header));
+
 		for (j=0;j<opts->req_depth;j++)
 			tasks[i].req_header[j].pending = 0;
 
-		tasks[i].retry_token = alloca(2 * opts->req_depth * sizeof(uint64_t));
+		tasks[i].retry_token = malloc(2 * opts->req_depth * sizeof(uint64_t));
+		if (!tasks[i].retry_token) {
+			die("ERROR: failed to alloc memory\n");
+		}
+		memset(tasks[i].retry_token, 0, 2 * opts->req_depth * sizeof(uint64_t));
+
 		tasks[i].rdma_next_op = (i & 1)? RDMA_OP_READ : RDMA_OP_WRITE;
 	}
 

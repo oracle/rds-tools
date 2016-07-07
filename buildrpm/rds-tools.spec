@@ -1,7 +1,7 @@
 Name:		rds-tools
 Summary:	RDS support tools 
 Version:	2.0.7
-Release:	1.17%{?dist}
+Release:	1.18%{?dist}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/

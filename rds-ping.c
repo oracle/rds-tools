@@ -3,7 +3,7 @@
  *
  * Test reachability of a remote RDS node by sending a packet to port 0.
  *
- * Copyright (C) 2008 Oracle.  All rights reserved.
+ * Copyright (c) 2008, 2018 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -37,6 +37,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -49,6 +50,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <sys/ioctl.h>
+#include <limits.h>
 #include "rds.h"
 
 #include "pfhack.h"
@@ -64,10 +66,18 @@
 	exit(1);						\
 } while (0)
 
+/*
+ * Used to represent both IPv4 and IPv6 sockaddr.
+ */
+union sockaddr_ip {
+	struct sockaddr_in	addr4;
+	struct sockaddr_in6	addr6;
+};
+
 static struct timeval	opt_wait = { 1, 1 };		/* 1s */
 static unsigned long	opt_count;
-static struct in_addr	opt_srcaddr;
-static struct in_addr	opt_dstaddr;
+static union sockaddr_ip	opt_srcaddr;
+static union sockaddr_ip	opt_dstaddr;
 static unsigned long	opt_tos = 0;
 
 /* For reasons of simplicity, RDS ping does not use a packet
@@ -87,17 +97,18 @@ struct socket {
 
 static int	do_ping(void);
 static void	report_packet(struct socket *sp, const struct timeval *now,
-			const struct in_addr *from, int err);
+			const union sockaddr_ip *from, int err);
 static void	usage(const char *complaint);
-static int	rds_socket(struct in_addr *src, struct in_addr *dst);
+static int	rds_socket(union sockaddr_ip *src, union sockaddr_ip *dst);
 static int	parse_timeval(const char *, struct timeval *);
 static int	parse_long(const char *ptr, unsigned long *);
-static int	parse_addr(const char *ptr, struct in_addr *);
+static int	parse_addr(const char *ptr, union sockaddr_ip *);
 
 int
 main(int argc, char **argv)
 {
 	int c;
+	bool src_set = false;
 
 	while ((c = getopt(argc, argv, "c:i:I:Q:")) != -1) {
 		switch (c) {
@@ -109,6 +120,7 @@ main(int argc, char **argv)
 		case 'I':
 			if (!parse_addr(optarg, &opt_srcaddr))
 				die("Unknown source address <%s>\n", optarg);
+			src_set = true;
 			break;
 
 		case 'i':
@@ -130,6 +142,10 @@ main(int argc, char **argv)
 	if (!parse_addr(argv[optind], &opt_dstaddr))
 		die("Cannot parse destination address <%s>\n", argv[optind]);
 
+	if (src_set && opt_dstaddr.addr4.sin_family !=
+	    opt_srcaddr.addr4.sin_family)
+		die("Source and destination address family are not the same\n");
+
 	return do_ping();
 }
 
@@ -143,36 +159,37 @@ usec_sub(const struct timeval *a, const struct timeval *b)
 static int
 do_ping(void)
 {
-	struct sockaddr_in sin;
 	unsigned int	sent = 0, recv = 0;
 	struct timeval	next_ts;
 	struct socket	socket[NSOCKETS];
 	struct pollfd	pfd[NSOCKETS];
 	int             pending[NSOCKETS];
 	int		i, next = 0;
+	socklen_t	dst_len;
 
 	for (i = 0; i < NSOCKETS; ++i) {
 		int fd;
 
 		fd = rds_socket(&opt_srcaddr, &opt_dstaddr);
-
 		socket[i].fd = fd;
 		pfd[i].fd = fd;
 		pfd[i].events = POLLIN;
 		pending[i] = 0;
 	}
 
-	memset(&sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
-	sin.sin_addr = opt_dstaddr;
+	/* Family check is already done earlier - just set length. */
+	if (opt_dstaddr.addr4.sin_family == AF_INET)
+		dst_len = sizeof(struct sockaddr_in);
+	else
+		dst_len = sizeof(struct sockaddr_in6);
 
 	gettimeofday(&next_ts, NULL);
 	while (1) {
-		struct timeval	now;
-		struct sockaddr_in from;
-		socklen_t	alen = sizeof(from);
-		long		deadline;
-		int		ret;
+		struct timeval		now;
+		union sockaddr_ip	from;
+		socklen_t		alen = sizeof(from);
+		long			deadline;
+		int			ret;
 
 		/* Fast way out - if we have received all packets, bail now.
 		 * If we're still waiting for some to come back, we need
@@ -190,11 +207,8 @@ do_ping(void)
 
 			timeradd(&now, &opt_wait, &next_ts);
 			if (!pending[next]) {
-				memset(&sin, 0, sizeof(sin));
-				sin.sin_family = AF_INET;
-				sin.sin_addr = opt_dstaddr;
-
-				if (sendto(sp->fd, NULL, 0, 0, (struct sockaddr *) &sin, sizeof(sin)))
+				if (sendto(sp->fd, NULL, 0, 0,
+				    (struct sockaddr *)&opt_dstaddr, dst_len))
 					err = errno;
 				sp->sent_id = ++sent;
 				sp->sent_ts = now;
@@ -238,7 +252,7 @@ do_ping(void)
 				    errno != EINTR)
 					report_packet(sp, &now, NULL, errno);
 			} else {
-				report_packet(sp, &now, &from.sin_addr, 0);
+				report_packet(sp, &now, &from, 0);
 				pending[i] = 0;
 				recv++;
 			}
@@ -251,13 +265,33 @@ do_ping(void)
 
 static void
 report_packet(struct socket *sp, const struct timeval *now,
-		const struct in_addr *from_addr, int err)
+	      const union sockaddr_ip *from, int err)
 {
 	printf(" %3u:", sp->sent_id);
 	if (now)
 		printf(" %ld usec", usec_sub(now, &sp->sent_ts));
-	if (from_addr && from_addr->s_addr != opt_dstaddr.s_addr)
-		printf(" (%s)", inet_ntoa(*from_addr));
+	if (from) {
+		char from_name[INET6_ADDRSTRLEN];
+
+		if (opt_dstaddr.addr4.sin_family == AF_INET) {
+			if (from->addr4.sin_addr.s_addr !=
+			    opt_dstaddr.addr4.sin_addr.s_addr) {
+				(void) inet_ntop(AF_INET, &from->addr4.sin_addr,
+						 from_name, sizeof(from_name));
+				printf(" (%s)", from_name);
+			}
+		} else {
+			if (!IN6_ARE_ADDR_EQUAL(&from->addr6.sin6_addr,
+			    &opt_dstaddr.addr6.sin6_addr)) {
+				(void) inet_ntop(AF_INET6,
+						 &from->addr6.sin6_addr,
+						 from_name,
+						 sizeof(from_name));
+				printf(" (%s)", from_name);
+			}
+		}
+	}
+
 	if (sp->nreplies)
 		printf(" DUP!");
 	if (err)
@@ -268,14 +302,11 @@ report_packet(struct socket *sp, const struct timeval *now,
 }
 
 static int
-rds_socket(struct in_addr *src, struct in_addr *dst)
+rds_socket(union sockaddr_ip *src, union sockaddr_ip *dst)
 {
-	struct sockaddr_in sin;
+	socklen_t alen;
 	int fd;
 	int pf;
-
-	memset(&sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
 
 #ifdef DYNAMIC_PF_RDS
         pf = discover_pf_rds();
@@ -287,31 +318,69 @@ rds_socket(struct in_addr *src, struct in_addr *dst)
 		die_errno("unable to create RDS socket");
 
 	/* Guess the local source addr if not given. */
-	if (src->s_addr == 0) {
-		socklen_t alen;
+	if (src->addr4.sin_family == AF_UNSPEC) {
 		int ufd;
+		in_port_t *dst_port;
 
-		ufd = socket(PF_INET, SOCK_DGRAM, 0);
+		ufd = socket(dst->addr4.sin_family, SOCK_DGRAM, 0);
 		if (ufd < 0)
 			die_errno("unable to create UDP socket");
-		sin.sin_addr = *dst;
-		sin.sin_port = htons(1);
-		if (connect(ufd, (struct sockaddr *) &sin, sizeof(sin)) < 0)
-			die_errno("unable to connect to %s",
-					inet_ntoa(*dst));
 
-		alen = sizeof(sin);
-		if (getsockname(ufd, (struct sockaddr *) &sin, &alen) < 0)
+		switch (dst->addr4.sin_family) {
+		case AF_INET:
+			dst_port = &dst->addr4.sin_port;
+			*dst_port = htons(1);
+			alen = sizeof(struct sockaddr_in);
+			break;
+		case AF_INET6:
+			dst_port = &dst->addr6.sin6_port;
+			*dst_port = htons(1);
+			alen = sizeof(struct sockaddr_in6);
+			break;
+		default:
+			die_errno("unknown destination address family");
+			break;
+		}
+
+		if (connect(ufd, (struct sockaddr *)dst, alen) < 0) {
+			char name[INET6_ADDRSTRLEN];
+			socklen_t name_len = sizeof(name);
+
+			if (dst->addr4.sin_family == AF_INET) {
+				(void) inet_ntop(AF_INET, &dst->addr4.sin_addr,
+						 name, name_len);
+			} else {
+				(void) inet_ntop(AF_INET6,
+						 &dst->addr6.sin6_addr, name,
+						 name_len);
+			}
+			die_errno("unable to connect to %s", name);
+		}
+
+		/* Remember to reset the destination port. */
+		*dst_port = 0;
+
+		if (getsockname(ufd, (struct sockaddr *)src, &alen) < 0)
 			die_errno("getsockname failed");
 
-		*src = sin.sin_addr;
 		close(ufd);
 	}
 
-	sin.sin_addr = *src;
-	sin.sin_port = 0;
+	switch (src->addr4.sin_family) {
+	case AF_INET:
+		src->addr4.sin_port = 0;
+		alen = sizeof(struct sockaddr_in);
+		break;
+	case AF_INET6:
+		src->addr6.sin6_port = 0;
+		alen = sizeof(struct sockaddr_in6);
+		break;
+	default:
+		die("unknown source address family");
+		break;
+	}
 
-	if (bind(fd, (struct sockaddr *) &sin, sizeof(sin)))
+	if (bind(fd, (struct sockaddr *)src, alen) != 0)
 		die_errno("bind() failed");
 
 	if (opt_tos && ioctl(fd, SIOCRDSSETTOS, &opt_tos)) 
@@ -390,18 +459,29 @@ parse_long(const char *ptr, unsigned long *ret)
 	return 1;
 }
 
+/*
+ * We just return the address here without checking if the returned address
+ * matches the correct family.  The caller should do the check instead.
+ */
 static int
-parse_addr(const char *ptr, struct in_addr *ret)
+parse_addr(const char *ptr, union sockaddr_ip *ret)
 {
-        struct hostent *hent;
+	struct addrinfo *ainfo;
 
-        hent = gethostbyname(ptr);
-        if (hent &&
-            hent->h_addrtype == AF_INET && hent->h_length == sizeof(*ret)) {
-		memcpy(ret, hent->h_addr, sizeof(*ret));
-		return 1;
+	if (getaddrinfo(ptr, NULL, NULL, &ainfo) != 0)
+		return 0;
+
+	/* Just use the first one returned. */
+	switch (ainfo->ai_family) {
+	case AF_INET:
+	case AF_INET6:
+		(void) memcpy(ret, ainfo->ai_addr, ainfo->ai_addrlen);
+		break;
+	default:
+		die("getaddrinfo() returns unsupported family: %d\n",
+		    ainfo->ai_family);
+		break;
 	}
-
-	return 0;
+	freeaddrinfo(ainfo);
+	return 1;
 }
-

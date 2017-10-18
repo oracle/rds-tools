@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Oracle.  All rights reserved.
+ * Copyright (c) 2006, 2018 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -46,6 +46,7 @@
 #include <inttypes.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdbool.h>
 
 #include "rds.h"
 #include "pfhack.h"
@@ -79,6 +80,10 @@ static int	opt_verbose = 0;
 
 char *progname = "rds-info";
 
+/* IPv4/v6 address output string width */
+#define PRT_IPV4_WIDTH	15
+#define PRT_IPV6_WIDTH	37
+
 /* Like inet_ntoa, but can be re-entered several times without clobbering
  * the previously returned string. */
 static const char *paddr(int af, const void *addrp)
@@ -94,158 +99,299 @@ static const char *paddr(int af, const void *addrp)
 	return string;
 }
 
-static const char *ipv4addr(uint32_t addr)
-{
-	return paddr(AF_INET, &addr);
-}
-
 static const char *ipv6addr(const void *addr)
 {
 	return paddr(AF_INET6, addr);
 }
 
-static void print_counters(void *data, int each, socklen_t len, void *extra)
+/*
+ * If prt_ipv6 is true, the given pointer is a struct in6_addr and IPv4
+ * address is represented as an IPv4 mapped address.  If prt_ipv6 is false,
+ * the given pointer is a struct in_addr.  This function returns a pointer
+ * to an ASCII representation of the given address.
+ */
+static const char *ipaddr(const void *addr, bool prt_ipv6)
+{
+	struct in6_addr *v6addr = (struct in6_addr *)addr;
+
+	if (prt_ipv6) {
+		if (IN6_IS_ADDR_V4MAPPED(v6addr))
+			return paddr(AF_INET, &v6addr->s6_addr32[3]);
+		else
+			return paddr(AF_INET6, v6addr);
+	} else {
+		return paddr(AF_INET, addr);
+	}
+}
+
+static void print_counters(void *data, int each, socklen_t len, void *extra,
+			   bool prt_ipv6)
 {
 	struct rds_info_counter ctr;
 
-	printf("\nCounters:\n%25s %16s\n", "CounterName", "Value");
+	printf("\nCounters:\n%32s %16s\n", "CounterName", "Value");
 
 	for_each(ctr, data, each, len)
-		printf("%25s %16"PRIu64"\n", ctr.name, ctr.value);
+		printf("%32s %16"PRIu64"\n", ctr.name, ctr.value);
 }
 
-static void print_sockets(void *data, int each, socklen_t len, void *extra)
+static void print_sockets(void *data, int each, socklen_t len, void *extra,
+			  bool prt_ipv6)
 {
+	struct rds6_info_socket sk6;
 	struct rds_info_socket sk;
+	int prt_width;
 
-	printf("\nRDS Sockets:\n%15s %5s %15s %5s %10s %10s %8s\n",
-		"BoundAddr", "BPort", "ConnAddr", "CPort", "SndBuf",
-		"RcvBuf", "Inode");
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
 
-	for_each(sk, data, each, len) {
-		printf("%15s %5u %15s %5u %10u %10u %8Lu\n",
-			ipv4addr(sk.bound_addr),
-			ntohs(sk.bound_port),
-			ipv4addr(sk.connected_addr),
-			ntohs(sk.connected_port),
-			sk.sndbuf, sk.rcvbuf,
-			(unsigned long long) sk.inum);
+	printf("\nRDS Sockets:\n%*s %5s %*s %5s %10s %10s %8s\n",
+	       prt_width, "BoundAddr", "BPort", prt_width, "ConnAddr", "CPort",
+	       "SndBuf", "RcvBuf", "Inode");
+
+	if (prt_ipv6) {
+		for_each(sk6, data, each, len) {
+			printf("%*s %5u %*s %5u %10u %10u %8Lu\n",
+			       prt_width, ipaddr(&sk6.bound_addr, prt_ipv6),
+			       ntohs(sk6.bound_port),
+			       prt_width, ipaddr(&sk6.connected_addr, prt_ipv6),
+			       ntohs(sk6.connected_port),
+			       sk6.sndbuf, sk6.rcvbuf,
+			       (unsigned long long)sk6.inum);
+		}
+	} else {
+		for_each(sk, data, each, len) {
+			printf("%*s %5u %*s %5u %10u %10u %8Lu\n",
+			       prt_width, ipaddr(&sk.bound_addr, prt_ipv6),
+			       ntohs(sk.bound_port),
+			       prt_width, ipaddr(&sk.connected_addr, prt_ipv6),
+			       ntohs(sk.connected_port),
+			       sk.sndbuf, sk.rcvbuf,
+			       (unsigned long long)sk.inum);
+		}
 	}
 }
 
-static void print_conns(void *data, int each, socklen_t len, void *extra)
+static void print_conns(void *data, int each, socklen_t len, void *extra,
+			bool prt_ipv6)
 {
+	struct rds6_info_connection conn6;
 	struct rds_info_connection conn;
+	int prt_width;
 
-	printf("\nRDS Connections:\n%15s %15s %4s %16s %16s %4s\n",
-		"LocalAddr", "RemoteAddr", "Tos", "NextTX", "NextRX", "Flgs");
-	
-	for_each(conn, data, each, len) {
-		printf("%15s %15s %4u %16"PRIu64" %16"PRIu64" %c%c%c%c\n",
-			ipv4addr(conn.laddr),
-			ipv4addr(conn.faddr),
-			conn.tos,
-			conn.next_tx_seq,
-			conn.next_rx_seq,
-			rds_conn_flag(conn, SENDING, 's'),
-			rds_conn_flag(conn, CONNECTING, 'c'),
-			rds_conn_flag(conn, CONNECTED, 'C'),
-			rds_conn_flag(conn, ERROR, 'E'));
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
+
+	printf("\nRDS Connections:\n%*s %*s %4s %16s %16s %4s\n",
+	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos",
+	       "NextTX", "NextRX", "Flgs");
+
+	if (prt_ipv6) {
+		for_each(conn6, data, each, len) {
+			printf("%*s %*s %4u %16"PRIu64" %16"PRIu64" %c%c%c%c\n",
+			       prt_width, ipaddr(&conn6.laddr, prt_ipv6),
+			       prt_width, ipaddr(&conn6.faddr, prt_ipv6),
+			       conn6.tos,
+			       conn6.next_tx_seq,
+			       conn6.next_rx_seq,
+			       rds_conn_flag(conn6, SENDING, 's'),
+			       rds_conn_flag(conn6, CONNECTING, 'c'),
+			       rds_conn_flag(conn6, CONNECTED, 'C'),
+			       rds_conn_flag(conn6, ERROR, 'E'));
+		}
+	} else {
+		for_each(conn, data, each, len) {
+			printf("%*s %*s %4u %16"PRIu64" %16"PRIu64" %c%c%c%c\n",
+			       prt_width, ipaddr(&conn.laddr, prt_ipv6),
+			       prt_width, ipaddr(&conn.faddr, prt_ipv6),
+			       conn.tos,
+			       conn.next_tx_seq,
+			       conn.next_rx_seq,
+			       rds_conn_flag(conn, SENDING, 's'),
+			       rds_conn_flag(conn, CONNECTING, 'c'),
+			       rds_conn_flag(conn, CONNECTED, 'C'),
+			       rds_conn_flag(conn, ERROR, 'E'));
+		}
 	}
 }
 
-static void print_msgs(void *data, int each, socklen_t len, void *extra)
+static void print_msgs(void *data, int each, socklen_t len, void *extra,
+		       bool prt_ipv6)
 {
+	struct rds6_info_message msg6;
 	struct rds_info_message msg;
+	int prt_width;
 
-	printf("\n%s Message Queue:\n%15s %5s %15s %5s %4s %16s %10s\n",
-		(char *)extra,
-		"LocalAddr", "LPort", "RemoteAddr", "RPort", "Tos","Seq", "Bytes");
-	
-	for_each(msg, data, each, len) {
-		printf("%15s %5u %15s %5u %4u %16"PRIu64" %10u\n",
-			ipv4addr(msg.laddr),
-			ntohs(msg.lport),
-			ipv4addr(msg.faddr),
-			ntohs(msg.fport),
-			msg.tos,
-			msg.seq, msg.len);
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
+
+	printf("\n%s Message Queue:\n%*s %5s %*s %5s %4s %16s %10s\n",
+	       (char *)extra,
+	       prt_width, "LocalAddr", "LPort", prt_width, "RemoteAddr",
+	       "RPort", "Tos", "Seq", "Bytes");
+
+	if (prt_ipv6) {
+		for_each(msg6, data, each, len) {
+			printf("%*s %5u %*s %5u %4u %16"PRIu64" %10u\n",
+			       prt_width, ipaddr(&msg6.laddr, prt_ipv6),
+			       ntohs(msg6.lport),
+			       prt_width, ipaddr(&msg6.faddr, prt_ipv6),
+			       ntohs(msg6.fport),
+			       msg6.tos,
+			       msg6.seq, msg6.len);
+		}
+	} else {
+		for_each(msg, data, each, len) {
+			printf("%*s %5u %*s %5u %4u %16"PRIu64" %10u\n",
+			       prt_width, ipaddr(&msg.laddr, prt_ipv6),
+			       ntohs(msg.lport),
+			       prt_width, ipaddr(&msg.faddr, prt_ipv6),
+			       ntohs(msg.fport),
+			       msg.tos,
+			       msg.seq, msg.len);
+		}
 	}
 }
 
-static void print_tcp_socks(void *data, int each, socklen_t len, void *extra)
+static void print_tcp_socks(void *data, int each, socklen_t len, void *extra,
+			    bool prt_ipv6)
 {		
+	struct rds6_info_tcp_socket ts6;
 	struct rds_info_tcp_socket ts;
+	int prt_width;
+
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
 
 	printf("\nTCP Connections:\n"
-		"%15s %5s %15s %5s %10s %10s %10s %10s %10s\n",
-		"LocalAddr", "LPort", "RemoteAddr", "RPort",
-		"HdrRemain", "DataRemain", "SentNxt", "ExpectUna", "SeenUna");
-	
-	for_each(ts, data, each, len) {
-		printf("%15s %5u %15s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
-			ipv4addr(ts.local_addr),
-			ntohs(ts.local_port),
-			ipv4addr(ts.peer_addr),
-			ntohs(ts.peer_port),
-			ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
-			ts.last_expected_una, ts.last_seen_una);
-	}
-}
+	       "%*s %5s %*s %5s %10s %10s %10s %10s %10s\n",
+	       prt_width, "LocalAddr", "LPort", prt_width, "RemoteAddr",
+	       "RPort", "HdrRemain", "DataRemain", "SentNxt", "ExpectUna",
+	       "SeenUna");
 
-static void print_ib_conns(void *data, int each, socklen_t len, void *extra)
-{
-	struct rds_info_rdma_connection ic;
-
-	printf("\nRDS IB Connections:\n%15s %15s %4s %3s %32s %32s\n",
-		"LocalAddr", "RemoteAddr", "Tos", "SL", "LocalDev", "RemoteDev");
-
-	for_each(ic, data, each, len) {
-		printf("%15s %15s %4u %3u %32s %32s",
-			ipv4addr(ic.src_addr),
-			ipv4addr(ic.dst_addr),
-			ic.tos,ic.sl,
-			ipv6addr(ic.src_gid),
-			ipv6addr(ic.dst_gid));
-
-		if (opt_verbose) {
-			printf("  send_wr=%u", ic.max_send_wr);
-			printf(", recv_wr=%u", ic.max_recv_wr);
-			printf(", send_sge=%u", ic.max_send_sge);
-			printf(", rdma_mr_max=%u", ic.rdma_mr_max);
-			printf(", rdma_mr_size=%u", ic.rdma_mr_size);
-			printf(", cache_allocs=%u", ic.cache_allocs);
+	if (prt_ipv6) {
+		for_each(ts6, data, each, len) {
+			printf("%*s %5u %*s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
+			       prt_width, ipaddr(&ts6.local_addr, prt_ipv6),
+			       ntohs(ts6.local_port),
+			       prt_width, ipaddr(&ts6.peer_addr, prt_ipv6),
+			       ntohs(ts6.peer_port),
+			       ts6.hdr_rem, ts6.data_rem, ts6.last_sent_nxt,
+			       ts6.last_expected_una, ts6.last_seen_una);
 		}
-
-		printf("\n");
+	} else {
+		for_each(ts, data, each, len) {
+			printf("%*s %5u %*s %5u %10"PRIu64" %10"PRIu64" %10u %10u %10u\n",
+			       prt_width, ipaddr(&ts.local_addr, prt_ipv6),
+			       ntohs(ts.local_port),
+			       prt_width, ipaddr(&ts.peer_addr, prt_ipv6),
+			       ntohs(ts.peer_port),
+			       ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
+			       ts.last_expected_una, ts.last_seen_una);
+		}
 	}
 }
 
+static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
+			   bool prt_ipv6)
+{
+	struct rds6_info_rdma_connection ic6;
+	struct rds_info_rdma_connection ic;
+	int prt_width;
+
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
+
+
+	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s\n",
+	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos", "SL",
+	       "LocalDev", "RemoteDev");
+
+	if (prt_ipv6) {
+		for_each(ic6, data, each, len) {
+			printf("%*s %*s %4u %3u %32s %32s",
+			       prt_width, ipaddr(&ic6.src_addr, prt_ipv6),
+			       prt_width, ipaddr(&ic6.dst_addr, prt_ipv6),
+			       ic6.tos, ic6.sl,
+			       ipv6addr(ic6.src_gid),
+			       ipv6addr(ic6.dst_gid));
+
+			if (opt_verbose) {
+				printf("  send_wr=%u", ic6.max_send_wr);
+				printf(", recv_wr=%u", ic6.max_recv_wr);
+				printf(", send_sge=%u", ic6.max_send_sge);
+				printf(", rdma_mr_max=%u", ic6.rdma_mr_max);
+				printf(", rdma_mr_size=%u", ic6.rdma_mr_size);
+				printf(", cache_allocs=%u", ic6.cache_allocs);
+			}
+
+			printf("\n");
+		}
+	} else {
+		for_each(ic, data, each, len) {
+			printf("%*s %*s %4u %3u %32s %32s",
+			       prt_width, ipaddr(&ic.src_addr, prt_ipv6),
+			       prt_width, ipaddr(&ic.dst_addr, prt_ipv6),
+			       ic.tos, ic.sl,
+			       ipv6addr(ic.src_gid),
+			       ipv6addr(ic.dst_gid));
+
+			if (opt_verbose) {
+				printf("  send_wr=%u", ic.max_send_wr);
+				printf(", recv_wr=%u", ic.max_recv_wr);
+				printf(", send_sge=%u", ic.max_send_sge);
+				printf(", rdma_mr_max=%u", ic.rdma_mr_max);
+				printf(", rdma_mr_size=%u", ic.rdma_mr_size);
+				printf(", cache_allocs=%u", ic.cache_allocs);
+			}
+
+			printf("\n");
+		}
+	}
+}
+
+/*
+ * opt_val_v6 constains the preferred socket option (IPv6) to use.  opt_val_v4
+ * constains the secondary socket option (IPv4) in case the kernel does not
+ * support IPv6.
+ */
 struct info {
-	int opt_val;
+	int opt_val_v6;
+	int opt_val_v4;
 	char *description;
-	void (*print)(void *data, int each, socklen_t len, void *extra);
+	void (*print)(void *data, int each, socklen_t len, void *extra,
+		      bool prt_ipv6);
 	void *extra;
 	int option_given;
 };
 
 struct info infos[] = {
-	['c'] = { RDS_INFO_COUNTERS, "statistic counters",
+	['c'] = { RDS_INFO_COUNTERS, RDS_INFO_COUNTERS, "statistic counters",
 		print_counters, NULL, 0 },
-	['k'] = { RDS_INFO_SOCKETS, "sockets", 
+	['k'] = { RDS6_INFO_SOCKETS, RDS_INFO_SOCKETS, "sockets",
 		print_sockets, NULL, 0 },
-	['n'] = { RDS_INFO_CONNECTIONS, "connections",
+	['n'] = { RDS6_INFO_CONNECTIONS, RDS_INFO_CONNECTIONS, "connections",
 		print_conns, NULL, 0 },
-	['r'] = { RDS_INFO_RECV_MESSAGES, "recv queue messages",
-		print_msgs, "Receive", 0 },
-	['s'] = { RDS_INFO_SEND_MESSAGES, "send queue messages",
-		print_msgs, "Send", 0 },
-	['t'] = { RDS_INFO_RETRANS_MESSAGES, "retransmit queue messages",
-		  print_msgs, "Retransmit", 0 },
-	['T'] = { RDS_INFO_TCP_SOCKETS, "TCP transport sockets",
-		  print_tcp_socks, NULL, 0 },
-	['I'] = { RDS_INFO_IB_CONNECTIONS, "IB transport connections",
-		  print_ib_conns, NULL, 0 },
+	['r'] = { RDS6_INFO_RECV_MESSAGES, RDS_INFO_RECV_MESSAGES,
+		"recv queue messages", print_msgs, "Receive", 0 },
+	['s'] = { RDS6_INFO_SEND_MESSAGES, RDS_INFO_SEND_MESSAGES,
+		"send queue messages", print_msgs, "Send", 0 },
+	['t'] = { RDS6_INFO_RETRANS_MESSAGES, RDS_INFO_RETRANS_MESSAGES,
+		"retransmit queue messages", print_msgs, "Retransmit", 0 },
+	['T'] = { RDS6_INFO_TCP_SOCKETS, RDS_INFO_TCP_SOCKETS,
+		"TCP transport sockets", print_tcp_socks, NULL, 0 },
+	['I'] = { RDS6_INFO_IB_CONNECTIONS, RDS_INFO_IB_CONNECTIONS,
+		"IB transport connections", print_ib_conns, NULL, 0 },
 };
 
 static void print_usage(int rc)
@@ -258,8 +404,9 @@ static void print_usage(int rc)
 	verbosef(0, output, "The following options limit output to the given "
 		 "sources:\n");
 
+	printf("    -a include both IPv6 and IPv4 RDS connections\n");
 	for (i = 0; i < array_size(infos); i++) {
-		if (!infos[i].opt_val)
+		if (!infos[i].opt_val_v6)
 			continue;
 		printf("    -%c %s\n", i, infos[i].description);
 	}
@@ -271,7 +418,7 @@ static void print_usage(int rc)
 
 int main(int argc, char **argv)
 {
-	char optstring[258] = "v+";
+	char optstring[258] = "av+";
 	int given_options = 0;
 	socklen_t len = 0;
 	void *data = NULL;
@@ -282,11 +429,15 @@ int main(int argc, char **argv)
 	int i;
 	int pf;
 	int sol;
+	bool v4andv6;
+
+	/* Default is to print out IPv4 RDS connection info only. */
+	v4andv6 = false;
 
 	/* quickly append all our info options to the optstring */
 	last = &optstring[strlen(optstring)];
 	for (i = 0; i < array_size(infos); i++) {
-		if (!infos[i].opt_val)
+		if (!infos[i].opt_val_v6)
 			continue;
 		*last = (char)i;
 		last++;
@@ -298,9 +449,12 @@ int main(int argc, char **argv)
 		case 'v':
 			opt_verbose++;
 			continue;
+		case 'a':
+			v4andv6 = true;
+			continue;
 		}
 
-		if (c >= array_size(infos) || !infos[c].opt_val) {
+		if (c >= array_size(infos) || !infos[c].opt_val_v6) {
 			verbosef(0, stderr, "%s: Invalid option \'-%c\'\n",
 				 progname, optopt);
 			print_usage(1);
@@ -326,13 +480,36 @@ int main(int argc, char **argv)
 
 	for (i = 0; i < array_size(infos); i++) {
 		int invalid_opt = 0;
-		if (!infos[i].opt_val ||
-		    (given_options && !infos[i].option_given))
+		int opt_val;
+		bool prt_ipv6;
+
+		if (v4andv6) {
+			opt_val = infos[i].opt_val_v6;
+			prt_ipv6 = true;
+		} else {
+			opt_val = infos[i].opt_val_v4;
+			prt_ipv6 = false;
+		}
+
+		if (!opt_val || (given_options && !infos[i].option_given))
 			continue;
 
 		/* read in the info until we get a full snapshot */
-		while ((each = getsockopt(fd, sol, infos[i].opt_val, data,
-				   &len)) < 0) {
+		while ((each = getsockopt(fd, sol, opt_val, data, &len)) < 0) {
+			/* If -a option is specified but kernel does not
+			 * support IPv6 option, switch to IPv4 only mode.
+			 * But note that this error can also happen if
+			 * rds_tcp/rds_rdma module info is requested but the
+			 * rds_tcp/rds_rdma module is not loaded.  So switch
+			 * temporarily only for this option by setting
+			 * prt_ipv6 to false.
+			 */
+			if (errno == ENOPROTOOPT && prt_ipv6) {
+				opt_val = infos[i].opt_val_v4;
+				prt_ipv6 = false;
+				continue;
+			}
+
 			if (errno != ENOSPC) {
 				verbosef(0, stderr,
 					 "%s: Unable get statistics: %s\n",
@@ -357,7 +534,7 @@ int main(int argc, char **argv)
 		if (invalid_opt)
 			continue;
 
-		infos[i].print(data, each, len, infos[i].extra);
+		infos[i].print(data, each, len, infos[i].extra, prt_ipv6);
 
 		if (given_options && --given_options == 0)
 			break;

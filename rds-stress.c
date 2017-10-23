@@ -2278,6 +2278,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 					t->congested = 1;
 				else if (errno == EBADSLT)
 					t->drain_rdmas = 1;
+				else if (errno == EAGAIN)
+					continue;
 				else
 					break;
 			}

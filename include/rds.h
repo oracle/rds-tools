@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Oracle.  All rights reserved.
+ * Copyright (c) 2008, 2017 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -34,7 +34,20 @@
 #ifndef _LINUX_RDS_H
 #define _LINUX_RDS_H
 
+/* This is a copy of include/uapi/linux/rds.h from the UEK kernel source.
+ * Note that the u8 and u64 types are changed to the C standard uint8_t and
+ * uint64_t respectively.
+ */
+
 #include <linux/types.h>
+#include <limits.h>
+/* XXX <net/sock.h> was included as part of NETFILTER support (commit f13bbf62)
+ * but <net/sock.h> is not exported to uapi, although <linux/rds.h> is
+ * (in theory). Is <net/sock.h> needed for user-apps that use netfilter?
+ */
+#ifdef __KERNEL__
+#include <net/sock.h>
+#endif
 
 /* These sparse annotated types shouldn't be in any user
  * visible header file. We should clean this up rather
@@ -47,10 +60,11 @@
 
 #define RDS_IB_ABI_VERSION		0x301
 
+#define	SOL_RDS				276
 /*
  * setsockopt/getsockopt for SOL_RDS
  */
-#define RDS_CANCEL_SENT_TO      	1
+#define RDS_CANCEL_SENT_TO		1
 #define RDS_GET_MR			2
 #define RDS_FREE_MR			3
 /* deprecated: RDS_BARRIER 4 */
@@ -58,16 +72,49 @@
 #define RDS_CONG_MONITOR		6
 #define RDS_GET_MR_FOR_DEST		7
 #define RDS_CONN_RESET                  8
+#define SO_RDS_TRANSPORT		9
+
+/* supported values for SO_RDS_TRANSPORT */
+#define	RDS_TRANS_IB	0
+#define	RDS_TRANS_TCP	2
+#define	RDS_TRANS_COUNT	3
+#define	RDS_TRANS_NONE	(~0)
+
+/* Socket option to tap receive path latency
+ *	SO_RDS: SO_RDS_MSG_RXPATH_LATENCY
+ *	Format used struct rds_rx_trace_so
+ */
+#define SO_RDS_MSG_RXPATH_LATENCY	10
 
 /*
-    * ioctl commands for SQL_RDS
-    */
+ * ioctl commands for SOL_RDS
+*/
 #define SIOCRDSSETTOS                   (SIOCPROTOPRIVATE)
+#define SIOCRDSGETTOS                  (SIOCPROTOPRIVATE + 1)
+#define SIOCRDSENABLENETFILTER          (SIOCPROTOPRIVATE + 2)
 
-#define RDS_MAX_TOS                     15
+#define IPPROTO_OKA (142)
 
 typedef u_int8_t         rds_tos_t;
 
+/* RDS message Receive Path Latency points */
+enum rds_message_rxpath_latency {
+	RDS_MSG_RX_HDR_TO_DGRAM_START = 0,
+	RDS_MSG_RX_DGRAM_REASSEMBLE,
+	RDS_MSG_RX_DGRAM_DELIVERED,
+	RDS_MSG_RX_DGRAM_TRACE_MAX
+};
+
+struct rds_rx_trace_so {
+	uint8_t rx_traces;
+	uint8_t rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
+};
+
+struct rds_cmsg_rx_trace {
+	uint8_t rx_traces;
+	uint8_t rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
+	uint64_t rx_trace[RDS_MSG_RX_DGRAM_TRACE_MAX];
+};
 
 /*
  * Control message types for SOL_RDS.
@@ -85,8 +132,14 @@ typedef u_int8_t         rds_tos_t;
  *	R_Key along in an RDS extension header.
  *	The cmsg_data is a struct rds_get_mr_args,
  *	the same as for the GET_MR setsockopt.
- * RDS_CMSG_RDMA_STATUS (recvmsg)
- *	Returns the status of a completed RDMA operation.
+ * RDS_CMSG_RDMA_SEND_STATUS (recvmsg)
+ *	Returns the status of a completed RDMA/async send operation.
+ * RDS_CMSG_RXPATH_LATENCY(recvmsg)
+ *	Returns rds message latencies in various stages of receive
+ *	path in nS. Its set per socket using SO_RDS_MSG_RXPATH_LATENCY
+ *	socket option. Legitimate points are defined in
+ *	enum rds_message_rxpath_latency. More points can be added in
+ *	future. CSMG format is struct rds_cmsg_rx_trace.
  */
 #define RDS_CMSG_RDMA_ARGS		1
 #define RDS_CMSG_RDMA_DEST		2
@@ -95,9 +148,10 @@ typedef u_int8_t         rds_tos_t;
 #define RDS_CMSG_CONG_UPDATE		5
 #define RDS_CMSG_ATOMIC_FADD		6
 #define RDS_CMSG_ATOMIC_CSWP		7
-#define RDS_CMSG_MASKED_ATOMIC_FADD	8
-#define RDS_CMSG_MASKED_ATOMIC_CSWP	9
+#define RDS_CMSG_MASKED_ATOMIC_FADD     8
+#define RDS_CMSG_MASKED_ATOMIC_CSWP     9
 #define RDS_CMSG_ASYNC_SEND             10
+#define RDS_CMSG_RXPATH_LATENCY		11
 
 #define RDS_INFO_FIRST			10000
 #define RDS_INFO_COUNTERS		10000
@@ -121,7 +175,7 @@ struct rds_info_counter {
 #define RDS_INFO_CONNECTION_FLAG_SENDING	0x01
 #define RDS_INFO_CONNECTION_FLAG_CONNECTING	0x02
 #define RDS_INFO_CONNECTION_FLAG_CONNECTED	0x04
-#define RDS_INFO_CONNECTION_FLAG_ERROR		0x08
+#define RDS_INFO_CONNECTION_FLAG_ERROR          0x08
 
 #define TRANSNAMSIZ	16
 
@@ -132,7 +186,7 @@ struct rds_info_connection {
 	__be32		faddr;
 	u_int8_t	transport[TRANSNAMSIZ];		/* null term ascii */
 	u_int8_t	flags;
-	u_int8_t	tos;
+	u_int8_t        tos;
 } __attribute__((packed));
 
 struct rds_info_flow {
@@ -191,9 +245,16 @@ struct rds_info_rdma_connection {
 	uint32_t	max_send_sge;
 	uint32_t	rdma_mr_max;
 	uint32_t	rdma_mr_size;
-	uint8_t		tos;
-	uint8_t		sl;
-	uint32_t	cache_allocs;
+	uint8_t         tos;
+	uint8_t         sl;
+	uint32_t        cache_allocs;
+	uint32_t	frag;
+	uint16_t        flow_ctl_post_credit;
+	uint16_t        flow_ctl_send_credit;
+	uint32_t        qp_num;
+	uint32_t        w_alloc_ctr;
+	uint32_t        w_free_ctr;
+
 };
 
 /*
@@ -249,7 +310,7 @@ struct rds_get_mr_args {
 
 struct rds_get_mr_for_dest_args {
 	struct sockaddr_storage	dest_addr;
-	struct rds_iovec 	vec;
+	struct rds_iovec	vec;
 	u_int64_t		cookie_addr;
 	uint64_t		flags;
 };
@@ -270,35 +331,18 @@ struct rds_rdma_args {
 
 struct rds_atomic_args {
 	rds_rdma_cookie_t cookie;
-	uint64_t 	local_addr;
-	uint64_t 	remote_addr;
-	union {
-		struct {
-			uint64_t	compare;
-			uint64_t	swap;
-		} cswp;
-		struct {
-			uint64_t	add;
-		} fadd;
-		struct {
-			uint64_t	compare;
-			uint64_t	swap;
-			uint64_t	compare_mask;
-			uint64_t	swap_mask;
-		} m_cswp;
-		struct {
-			uint64_t	add;
-			uint64_t	nocarry_mask;
-		} m_fadd;
-	};
+	uint64_t	local_addr;
+	uint64_t	remote_addr;
+	uint64_t	swap_add;
+	uint64_t	compare;
 	u_int64_t	flags;
 	u_int64_t	user_token;
 };
 
 struct rds_reset {
-	u_int8_t        tos;
-	struct in_addr  src;
-	struct in_addr  dst;
+	u_int8_t	tos;
+	struct in_addr	src;
+	struct in_addr	dst;
 };
 
 struct rds_asend_args {
@@ -311,11 +355,11 @@ struct rds_rdma_send_notify {
 	int32_t		status;
 };
 
-#define RDS_RDMA_SEND_SUCCESS           0
-#define RDS_RDMA_REMOTE_ERROR           1
-#define RDS_RDMA_SEND_CANCELED          2
-#define RDS_RDMA_SEND_DROPPED           3
-#define RDS_RDMA_SEND_OTHER_ERROR       4
+#define RDS_RDMA_SEND_SUCCESS	0
+#define RDS_RDMA_REMOTE_ERROR	1
+#define RDS_RDMA_SEND_CANCELED	2
+#define RDS_RDMA_SEND_DROPPED	3
+#define RDS_RDMA_SEND_OTHER_ERROR	4
 
 /*
  * Common set of flags for all RDMA related structs
@@ -329,5 +373,39 @@ struct rds_rdma_send_notify {
 #define RDS_RDMA_SILENT		0x0040	/* Do not interrupt remote */
 #define RDS_RDMA_REMOTE_COMPLETE 0x0080 /* Notify when data is available */
 #define RDS_SEND_NOTIFY_ME      0x0100  /* Notify when operation completes */
+
+/* netfilter related components */
+struct rds_nf_hdr {
+	__be32 saddr;     /* source address of request */
+	__be32 daddr;     /* destination address */
+	__be16 sport;     /* source port number */
+	__be16 dport;     /* destination port number */
+	__be16 protocol;  /* rds socket protocol family to use */
+
+#define RDS_NF_HDR_FLAG_BOTH (0x1) /* request needs to go locally and remote */
+#define RDS_NF_HDR_FLAG_DONE (0x2) /* the request is consumed and done */
+	__be16 flags;     /* any configuration flags */
+	struct sock *sk;
+};
+
+/* pull out the 2 rdshdr from the SKB structures passed around */
+#define rds_nf_hdr_dst(skb) (&(((struct rds_nf_hdr *)skb_tail_pointer((skb)))[0]))
+#define rds_nf_hdr_org(skb) (&(((struct rds_nf_hdr *)skb_tail_pointer((skb)))[1]))
+
+/* temporary hack for a family that exists in the netfilter family */
+#define PF_RDS_HOOK   11
+
+enum rds_inet_hooks {
+	NF_RDS_PRE_ROUTING,
+	NF_RDS_FORWARD_ERROR,
+	NF_RDS_NUMHOOKS
+};
+
+enum rds_hook_priorities {
+	NF_RDS_PRI_FIRST = INT_MIN,
+	NF_RDS_PRI_OKA   = 0,
+	NF_RDS_PRI_LAST  = INT_MAX
+};
+
 
 #endif /* IB_RDS_H */

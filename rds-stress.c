@@ -261,7 +261,7 @@ void stop_soakers(struct soak_control *soak_arr);
  */
 #define OP_REQ		1
 #define OP_ACK		2
-#define OP_DUMP		3
+#define OP_ONLY_RDMA_RD	3
 
 #define RDMA_OP_READ	1
 #define RDMA_OP_WRITE	2
@@ -378,6 +378,14 @@ static unsigned long	sys_page_size;
 /* need vars as long as dynamic vals are possible */
 int pf = PF_RDS;
 int sol = SOL_RDS;
+
+static bool need_sw_fence(struct options_v6 *opts,
+			    struct header_v6 *hdr)
+{
+	return (!opts->rdma_use_fence &&
+		hdr->rdma_op == RDMA_OP_READ &&
+		(hdr->op == OP_REQ || hdr->op == OP_ACK));
+}
 
 /* zero is undefined */
 static inline uint64_t minz(uint64_t a, uint64_t b)
@@ -1130,6 +1138,8 @@ struct task {
 	unsigned int		pending;
 	int			trace;
 	unsigned int		unacked;
+	unsigned int		rdma_rd_unacked;
+	unsigned int		rdma_rd_sent;
 	union sockaddr_ip	src_addr;	/* same for all tasks */
 	union sockaddr_ip	dst_addr;
 	unsigned char		congested;
@@ -1138,9 +1148,11 @@ struct task {
 	uint32_t		recv_seq;
 	uint16_t		send_index;
 	uint16_t		recv_index;
+	uint16_t		rdma_rd_recv_index;
 	struct timeval		*send_time;
 	struct header_v6	*ack_header;
 	struct header_v6	*ack2_header;
+	struct header_v6	*rdma_rd_ack_header;
 	struct header_v6	*req_header;
 	uint64_t		*retry_token;
 	uint32_t		retries;
@@ -1366,6 +1378,9 @@ static void rdma_mark_completed(struct task *tasks, uint64_t token, int status,
 		hdr->rdma_remote_err = 0;
 	}
 
+	if (type == OP_ONLY_RDMA_RD)
+		t->rdma_rd_unacked++;
+
 	t->rdma_inflight[i] = 0;
 	t->drain_rdmas = 0;
 }
@@ -1574,6 +1589,7 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 	fill_hdr(buf, size, hdr, isv6);
 
 	memset(&msg, 0, sizeof(msg));
+
 	if (isv6) {
 		msg.msg_name  = (struct sockaddr *) &t->dst_addr6;
 		msg.msg_namelen = sizeof(t->dst_addr6);
@@ -1582,17 +1598,31 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 		msg.msg_namelen = sizeof(t->dst_addr4);
 	}
 
-	msg.msg_iovlen = 1;
-	msg.msg_iov = &iov;
-	iov.iov_base = buf;
-	iov.iov_len = size;
+	/* RDMA Rd OP does not carry data so rds-stress ACK will not
+	 * bypass the EDMA Rd and will cause the peer rds-stress to
+	 * release the MR key. rds-stress ACK for this RDMA Rd is delayed
+	 * till we get ACK from rds on this RDMA Rd. See
+	 * "rdma_mark_completed" below...
+	 */
+	if (hdr->op != OP_ONLY_RDMA_RD) {
+		msg.msg_iovlen = 1;
+		msg.msg_iov = &iov;
+		iov.iov_base = buf;
+		iov.iov_len = size;
+	}
 
-
-	/* If this is an ACK packet with RDMA, build the cmsg
+	/* If this is an ACK/RDMA Rd packet with RDMA, build the cmsg
 	   * header that goes with it. */
-	if (hdr->op == OP_ACK && hdr->rdma_op != 0 &&
+	if ((hdr->op == OP_ACK || hdr->op == OP_ONLY_RDMA_RD) &&
+	    hdr->rdma_op != 0 &&
 	    !hdr->rdma_remote_err) {
 		unsigned int qindex = hdr->index;
+		unsigned int type = (hdr->op == OP_ONLY_RDMA_RD) ?
+			OP_ONLY_RDMA_RD : 0;
+		uint64_t token = rdma_user_token(t, qindex, type, hdr->seq);
+
+		if (need_sw_fence(opts_v6, hdr))
+			die("RDMA Rd w/o hw/sw fence!");
 
 		if (t->rdma_inflight[qindex] != 0) {
 			/* It is unlikely but (provably) possible for
@@ -1603,12 +1633,11 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 			 *
 			 * We return one of the more obscure error messages,
 			 * which we recognize and handle in the top loop. */
-			trace("Drain RDMA 0x%lx\n", rdma_user_token(t, qindex, 0, hdr->seq));
+			trace("Drain RDMA 0x%lx\n", token);
 			errno = EBADSLT;
 			return -1;
 		}
-		rdma_build_cmsg_xfer(&msg, hdr,
-				rdma_user_token(t, qindex, 0, hdr->seq),
+		rdma_build_cmsg_xfer(&msg, hdr, token,
 				t->local_buf[qindex]);
 		rdma_flight_recorder = &t->rdma_inflight[qindex];
 	} else if (opts_v6->async) {
@@ -1640,7 +1669,7 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 			die_errno("sendto() failed");
 		return ret;
 	}
-	if (ret != size)
+	if (ret != size && hdr->op != OP_ONLY_RDMA_RD)
 		die("sendto() truncated - %zd", ret);
 
 	if (rdma_flight_recorder)
@@ -1671,7 +1700,10 @@ static int send_packet(int fd, struct task *t,
 	ret = send_msg(fd, t, hdr, size, opts, ctl, isv6);
 	if (ret < 0) return ret;
 
-	t->send_seq++;
+	/* RDMA Rd are not sent to remote so no send seq bump. */
+	if (hdr->op != OP_ONLY_RDMA_RD)
+		t->send_seq++;
+
 	return ret;
 }
 
@@ -1731,11 +1763,14 @@ static int send_one(int fd, struct task *t,
 static int send_ack(int fd, struct task *t, unsigned int qindex,
 		    struct options_v6 *opts,
 		    struct child_control *ctl,
-		    bool isv6)
+		    bool isv6, bool is_rdma_ack)
 {
 	struct header_v6 *hdr = &t->ack_header[qindex];
 	struct header_v6 *hdr2 = &t->ack2_header[qindex];
 	ssize_t ret;
+
+	if (is_rdma_ack)
+		hdr = &t->rdma_rd_ack_header[qindex];
 
 	if (opts->async && hdr2->pending) {
 		return -1;
@@ -1745,10 +1780,6 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 	ret = send_packet(fd, t, hdr, opts->ack_size, opts, ctl, isv6);
 	if (ret < 0)
 		return ret;
-	if (ret != opts->ack_size)
-		die_errno("sendto() returned %zd", ret);
-
-	stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
 
 	/* need separate rdma stats cells for send/recv */
 	switch (hdr->rdma_op) {
@@ -1760,6 +1791,16 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 		stat_inc(&ctl->cur[S_MBUS_IN_BYTES], opts->rdma_size);
 		break;
 	}
+
+	if (hdr->op == OP_ONLY_RDMA_RD)
+		return ret;
+
+	if (ret != opts->ack_size)
+		die_errno("sendto() returned %zd", ret);
+
+	trace("ACK: task %p seq %d index %d\n", t, hdr->seq, hdr->index);
+
+	stat_inc(&ctl->cur[S_ACK_TX_BYTES], ret);
 
 	memcpy(hdr2, hdr, sizeof(*hdr2));
 
@@ -1777,10 +1818,31 @@ static int ack_anything(int fd, struct task *t,
 		qindex = (t->recv_index - t->unacked + opts->req_depth) % opts->req_depth;
 		if (!can_send)
 			goto eagain;
-		if (send_ack(fd, t, qindex, opts, ctl, isv6) < 0)
+		/* when we have pending RDMA Rd requests we cannot send OP_ACK
+		 * before we send the ACKs on those pending requests... */
+		if (t->ack_header[qindex].op == OP_ACK &&
+		    t->rdma_rd_sent)
+			break;
+		if (send_ack(fd, t, qindex, opts, ctl, isv6, false) < 0)
 			return -1;
+		if (t->ack_header[qindex].op == OP_ONLY_RDMA_RD)
+			t->rdma_rd_sent++;
 		t->unacked -= 1;
 	}
+
+	while (t->rdma_rd_unacked) {
+		uint16_t qindex;
+
+		qindex = (t->rdma_rd_recv_index - t->rdma_rd_sent +
+			opts->req_depth) % opts->req_depth;
+		if (!can_send)
+			goto eagain;
+		if (send_ack(fd, t, qindex, opts, ctl, isv6, true) < 0)
+			return -1;
+		t->rdma_rd_unacked -= 1;
+		t->rdma_rd_sent--;
+	}
+
 	return 0;
 
 eagain:
@@ -2060,11 +2122,13 @@ static int recv_one(int fd, struct task *tasks,
 		if (in_hdr.rdma_key)
 			rdma_process_ack(fd, &in_hdr, ctl);
 	} else {
-		struct header_v6 *ack_hdr;
+		struct header_v6 *ack_hdr, *rdma_ack_hdr;
+		unsigned int op = need_sw_fence(opts, &in_hdr) ?
+			OP_ONLY_RDMA_RD : OP_ACK;
 
 		/* Build the ACK header right away */
 		ack_hdr = &t->ack_header[t->recv_index];
-		build_header(t, ack_hdr, OP_ACK, t->recv_index, isv6);
+		build_header(t, ack_hdr, op, t->recv_index, isv6);
 
 		/* The RDMA is performed at the time the ACK
 		 * message is sent. We need to mirror all
@@ -2081,6 +2145,21 @@ static int recv_one(int fd, struct task *tasks,
 
 		t->unacked += 1;
 		t->recv_index = (t->recv_index + 1) % opts->req_depth;
+
+		if (op == OP_ONLY_RDMA_RD) {
+			/* Prepare the ACK for the RDMA Rd. Only OP_ACK are sent
+			 * to the peer rds-stress. OP_ONLY_RDMA_RD are only used
+			 * to pass RDMA CMSG and trigger RDMA Rd on local socket
+			 */
+			rdma_ack_hdr =
+				&t->rdma_rd_ack_header[t->rdma_rd_recv_index];
+			memcpy(rdma_ack_hdr, ack_hdr, sizeof(*rdma_ack_hdr));
+			/* Mark that this is real ACK w/o RDMA OP */
+			rdma_ack_hdr->op = OP_ACK;
+			rdma_ack_hdr->rdma_op = 0;
+			t->rdma_rd_recv_index =
+				(t->rdma_rd_recv_index + 1) % opts->req_depth;
+		}
 	}
 	t->recv_seq++;
 
@@ -2187,6 +2266,17 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 		for (j=0;j<opts->req_depth;j++)
 			tasks[i].ack2_header[j].pending = 0;
+
+		tasks[i].rdma_rd_ack_header = malloc(opts->req_depth *
+					      sizeof(struct header_v6));
+		if (!tasks[i].rdma_rd_ack_header)
+			die("ERROR: failed to alloc memory\n");
+
+		memset(tasks[i].rdma_rd_ack_header, 0, opts->req_depth *
+		       sizeof(struct header_v6));
+
+		for (j = 0; j < opts->req_depth; j++)
+			tasks[i].rdma_rd_ack_header[j].pending = 0;
 
 		tasks[i].req_header = malloc(opts->req_depth *
 					     sizeof(struct header_v6));
@@ -3689,6 +3779,10 @@ int main(int argc, char **argv)
 		opts.rdma_use_get_mr = opts.rdma_cache_mrs;
 	else if (opts.rdma_cache_mrs && !opts.rdma_use_get_mr)
 		die("option --rdma-cache-mrs conflicts with --rdma-use-get-mr=0\n");
+
+	if (opts.async && opts.rdma_size && !opts.rdma_use_fence &&
+	    (opts.rw_mode == RDMA_OP_READ || opts.rw_mode == M_RDMA_READWRITE))
+		die("option --async=1 with RDMA Rd require --rdma-use-fence=1\n");
 
 	/* the passive parent will read options off the wire */
 	if (!set_send_addr)

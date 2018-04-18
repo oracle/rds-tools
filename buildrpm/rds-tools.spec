@@ -1,7 +1,7 @@
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.0.7
-Release:	1.19%{?dist}
+Version:	2.1.0
+Release:	1%{?dist}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -49,6 +49,15 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Wed Apr 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.0-1
+- Fix package version (Aron Silverton) [Orabug: 27887569]
+
+* Fri Jan 19 2018 Aron Silverton <aron.silverton@oracle.com> - 2.0.7-1.19
+- Add support for IPv6 (Ka-Cheong Poon) [Orabug: 26646596]
+
+* Fri Jul 08 2016 Mukesh Kacker <mukesh.kacker@oracle.com> - 2.0.7-1.18
+- Delete reference to experimental features in man pages
+
 * Tue Jun 07 2016 Guanglei Li <guanglei.li@oracle.com> - 2.0.7-1.17
 - Change rds-stress memory allocation to heap [orabug: 23312910]
 

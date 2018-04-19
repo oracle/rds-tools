@@ -1,6 +1,6 @@
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.1.0
+Version:	2.1.1
 Release:	1%{?dist}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -49,6 +49,10 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Thu Apr 19 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-1
+- rds-stress: Continue sending for other tasks when one task fails (Avinash Repaka) [Orabug: 23093216]
+- rds-stress: SW fence for RDMA Rd when HW fence is disabled (Shamir Rabinovitch) [Orabug: 27154692]
+
 * Wed Apr 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.0-1
 - Fix package version (Aron Silverton) [Orabug: 27887569]
 

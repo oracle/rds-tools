@@ -1,7 +1,10 @@
+%define RELEASE 1
+%{?el7:%define uektag uek4}
+
 Name:		rds-tools
 Summary:	RDS support tools 
 Version:	2.1.1
-Release:	1%{?dist}
+Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -49,6 +52,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1
+- Add "uek4" token for OL7 package builds (Aron Silverton) [Orabug: 27934606]
+
 * Thu Apr 19 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-1
 - rds-stress: Continue sending for other tasks when one task fails (Avinash Repaka) [Orabug: 23093216]
 - rds-stress: SW fence for RDMA Rd when HW fence is disabled (Shamir Rabinovitch) [Orabug: 27154692]

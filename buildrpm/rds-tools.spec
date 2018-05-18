@@ -1,4 +1,4 @@
-%define RELEASE 1
+%define RELEASE 2
 %{?el7:%define uektag uek4}
 
 Name:		rds-tools
@@ -52,7 +52,7 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1
+* Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-2
 - Add "uek4" token for OL7 package builds (Aron Silverton) [Orabug: 27934606]
 
 * Thu Apr 19 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-1

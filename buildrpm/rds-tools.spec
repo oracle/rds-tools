@@ -1,7 +1,9 @@
+%global flavor vos
+
 Name:		rds-tools
-Summary:	RDS support tools 
+Summary:	RDS support tools (Oracle VOS)
 Version:	2.1.1
-Release:	1%{?dist}
+Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -14,13 +16,20 @@ Various tools for support of the RDS (Reliable Datagram Socket) API.  RDS
 is specific to InfiniBand and iWARP networks and does not work on non-RDMA
 hardware.
 
+For use on Oracle Linux systems running the Oracle Database Virtual OS
+(VOS) layer.
+
 %package -n rds-devel
-Summary: Header files for RDS development
+Summary: Header files for RDS development (Oracle VOS)
 Group: Development/Libraries
 
 %description -n rds-devel
 Header file and manpages for rds and rds-rdma that describe
 how to use the socket interface.
+
+For use on Oracle Linux systems running the Oracle Database Virtual OS
+(VOS) layer.
+
 
 %prep
 %setup -q
@@ -49,6 +58,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Mon Aug 27 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1
+- Add "vos" to RPM release number (Aron Silverton) [Orabug 28550856]
+
 * Thu Apr 19 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-1
 - rds-stress: Continue sending for other tasks when one task fails (Avinash Repaka) [Orabug: 23093216]
 - rds-stress: SW fence for RDMA Rd when HW fence is disabled (Shamir Rabinovitch) [Orabug: 27154692]

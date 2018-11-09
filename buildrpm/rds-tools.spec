@@ -1,7 +1,7 @@
-%global flavor vos
+%global flavor ora
 
 Name:		rds-tools
-Summary:	RDS support tools (Oracle VOS)
+Summary:	RDS support tools (Oracle Extensions)
 Version:	2.1.1
 Release:	2%{?dist}%{flavor}
 License:	GPLv2 or BSD
@@ -16,19 +16,17 @@ Various tools for support of the RDS (Reliable Datagram Socket) API.  RDS
 is specific to InfiniBand and iWARP networks and does not work on non-RDMA
 hardware.
 
-For use on Oracle Linux systems running the Oracle Database Virtual OS
-(VOS) layer.
+For use on Oracle Linux systems running the Oracle Database Virtual OS layer.
 
 %package -n rds-devel
-Summary: Header files for RDS development (Oracle VOS)
+Summary: Header files for RDS development (Oracle Extensions)
 Group: Development/Libraries
 
 %description -n rds-devel
 Header file and manpages for rds and rds-rdma that describe
 how to use the socket interface.
 
-For use on Oracle Linux systems running the Oracle Database Virtual OS
-(VOS) layer.
+For use on Oracle Linux systems running the Oracle Database Virtual OS layer.
 
 
 %prep
@@ -58,6 +56,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Fri Nov 09 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1
+- oracle/spec: Change "vos" to "ora" and update summaries and descriptions [Orabug: 29128747]
+
 * Mon Aug 27 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1-2
 - Add "vos" to RPM release number (Aron Silverton) [Orabug 28550856]
 

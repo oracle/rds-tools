@@ -3,7 +3,7 @@
 Name:		rds-tools
 Summary:	RDS support tools (Oracle Extensions)
 Version:	2.1.1
-Release:	2%{?dist}%{flavor}
+Release:	3%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -56,8 +56,8 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Fri Nov 09 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1
-- oracle/spec: Change "vos" to "ora" and update summaries and descriptions [Orabug: 29128747]
+* Fri Nov 09 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1-3
+- spec: Change "vos" to "ora" and update summaries and descriptions [Orabug: 29128747]
 
 * Mon Aug 27 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1-2
 - Add "vos" to RPM release number (Aron Silverton) [Orabug 28550856]

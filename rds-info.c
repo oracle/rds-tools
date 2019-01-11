@@ -306,6 +306,8 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 	struct rds6_info_rdma_connection ic6;
 	struct rds_info_rdma_connection ic;
 	int prt_width;
+	int info_len;
+	info_len = sizeof(struct rds_info_rdma_connection);
 
 	if (prt_ipv6)
 		prt_width = PRT_IPV6_WIDTH;
@@ -313,9 +315,15 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 		prt_width = PRT_IPV4_WIDTH;
 
 
-	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s\n",
+	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s",
 	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos", "SL",
 	       "LocalDev", "RemoteDev");
+
+	if (each >= info_len) {
+		printf("  QPNo");
+	}
+
+	printf("\n");
 
 	if (prt_ipv6) {
 		for_each(ic6, data, each, len) {
@@ -326,6 +334,9 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ipv6addr(ic6.src_gid),
 			       ipv6addr(ic6.dst_gid));
 
+			if (each >= info_len) {
+				printf("  %d", ic6.qp_num);
+			}
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic6.max_send_wr);
 				printf(", recv_wr=%u", ic6.max_recv_wr);
@@ -346,6 +357,9 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ipv6addr(ic.src_gid),
 			       ipv6addr(ic.dst_gid));
 
+			if (each >= info_len) {
+				printf("  %d", ic.qp_num);
+			}
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic.max_send_wr);
 				printf(", recv_wr=%u", ic.max_recv_wr);

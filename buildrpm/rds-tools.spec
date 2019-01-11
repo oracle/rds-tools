@@ -52,6 +52,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 2.1.1
+- rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
+
 * Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-2
 - Add "uek4" token for OL7 package builds (Aron Silverton) [Orabug: 27934606]
 

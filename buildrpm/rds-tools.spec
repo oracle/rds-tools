@@ -56,6 +56,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 0:2
+- rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
+
 * Fri Nov 09 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1-3
 - spec: Change "vos" to "ora" and update summaries and descriptions [Orabug: 29128747]
 

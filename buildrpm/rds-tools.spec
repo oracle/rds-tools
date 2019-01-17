@@ -1,9 +1,9 @@
-%define RELEASE 2
+%define RELEASE 1
 %{?el7:%define uektag uek4}
 
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.1.1
+Version:	2.2.0
 Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -52,7 +52,7 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 2.1.1
+* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 2.2.0-1
 - rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
 
 * Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-2

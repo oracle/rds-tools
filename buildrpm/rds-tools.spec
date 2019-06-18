@@ -1,6 +1,11 @@
+%define uek2epoch 2
+%define uek4epoch 4
+%define uek5epoch 5
+
 %global flavor ora
 
 Name:		rds-tools
+Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
 Version:	2.2.0
 Release:	1%{?dist}%{flavor}
@@ -56,6 +61,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue Jun 18 2019 Aron Silverton <aron.silverton@oracle.com> - 5:2.2.0
+- spec: Add epoch to package versioning (Aron Silverton) [Orabug: 29921620]
+
 * Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 0:2.2.0-1
 - rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
 

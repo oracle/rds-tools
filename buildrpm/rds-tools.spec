@@ -8,7 +8,7 @@ Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
 Version:	2.2.0
-Release:	1%{?dist}%{flavor}
+Release:	2%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -61,10 +61,10 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Tue Jun 18 2019 Aron Silverton <aron.silverton@oracle.com> - 5:2.2.0
+* Tue Jun 18 2019 Aron Silverton <aron.silverton@oracle.com> - 5:2.2.0-2
 - spec: Add epoch to package versioning (Aron Silverton) [Orabug: 29921620]
 
-* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 0:2.2.0-1
+* Thu Jan 17 2019 Aron Silverton <aron.silverton@oracle.com> - 0:2.2.0-1
 - rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
 
 * Fri Nov 09 2018 Aron Silverton <aron.silverton@oracle.com> - 0:2.1.1-3

@@ -3,7 +3,7 @@
  *
  * Test reachability of a remote RDS node by sending a packet to port 0.
  *
- * Copyright (c) 2008, 2018 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2019 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -85,7 +85,9 @@ static unsigned long	opt_tos = 0;
  * Instead, we open a number of sockets on different ports, and
  * match packet sequence numbers with ports.
  */
-#define NSOCKETS	8	
+static unsigned long nsockets = 8;
+static unsigned long nsockets_min = 1;
+static unsigned long nsockets_max = 32;
 
 struct socket {
 	int fd;
@@ -109,12 +111,21 @@ main(int argc, char **argv)
 {
 	int c;
 	bool src_set = false;
+	bool num_sock_set = false;
 
-	while ((c = getopt(argc, argv, "c:i:I:Q:")) != -1) {
+	while ((c = getopt(argc, argv, "c:n:i:I:Q:")) != -1) {
 		switch (c) {
 		case 'c':
 			if (!parse_long(optarg, &opt_count))
 				die("Bad packet count <%s>\n", optarg);
+			break;
+
+		case 'n':
+			if (!parse_long(optarg, &nsockets) ||
+			    nsockets < nsockets_min || nsockets > nsockets_max)
+				die("Invalid number of sockets <%s>\n",
+				    optarg);
+			num_sock_set = true;
 			break;
 
 		case 'I':
@@ -146,6 +157,9 @@ main(int argc, char **argv)
 	    opt_srcaddr.addr4.sin_family)
 		die("Source and destination address family are not the same\n");
 
+	if (!num_sock_set && opt_count && opt_count < nsockets)
+		nsockets = opt_count;
+
 	return do_ping();
 }
 
@@ -161,13 +175,13 @@ do_ping(void)
 {
 	unsigned int	sent = 0, recv = 0;
 	struct timeval	next_ts;
-	struct socket	socket[NSOCKETS];
-	struct pollfd	pfd[NSOCKETS];
-	int             pending[NSOCKETS];
+	struct socket	socket[nsockets];
+	struct pollfd	pfd[nsockets];
+	int             pending[nsockets];
 	int		i, next = 0;
 	socklen_t	dst_len;
 
-	for (i = 0; i < NSOCKETS; ++i) {
+	for (i = 0; i < nsockets; ++i) {
 		int fd;
 
 		fd = rds_socket(&opt_srcaddr, &opt_dstaddr);
@@ -215,7 +229,7 @@ do_ping(void)
 				sp->nreplies = 0;
 				if (!err)
 					pending[next] = 1;
-				next = (next + 1) % NSOCKETS;
+				next = (next + 1) % nsockets;
 			}
 
 			if (err) {
@@ -228,7 +242,7 @@ do_ping(void)
 		}
 
 		deadline = usec_sub(&next_ts, &now);
-		ret = poll(pfd, NSOCKETS, deadline / 1000);
+		ret = poll(pfd, nsockets, deadline / 1000);
 		if (ret < 0) {
 			if (errno == EINTR)
 				continue;
@@ -237,7 +251,7 @@ do_ping(void)
 		if (ret == 0)
 			continue;
 
-		for (i = 0; i < NSOCKETS; ++i) {
+		for (i = 0; i < nsockets; ++i) {
 			struct socket *sp = &socket[i];
 
 			if (!(pfd[i].revents & POLLIN))
@@ -398,6 +412,7 @@ usage(const char *complaint)
 		"%s\nUsage: rds-ping [options] dst_addr\n"
 		"Options:\n"
 		" -c count      limit packet count\n"
+		" -n number     number of RDS sockets used\n"
 		" -I interface  source IP address\n"
 		" -Q tos	type of service\n",
 		complaint);

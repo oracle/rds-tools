@@ -481,10 +481,13 @@ parse_long(const char *ptr, unsigned long *ret)
 static int
 parse_addr(const char *ptr, union sockaddr_ip *ret)
 {
-	struct addrinfo *ainfo;
+	struct addrinfo *ainfo, hints = {.ai_flags = AI_NUMERICHOST,};
 
-	if (getaddrinfo(ptr, NULL, NULL, &ainfo) != 0)
-		return 0;
+	/* passing hints to avoid netlink syscall as possible */
+	if (getaddrinfo(ptr, NULL, &hints, &ainfo) != 0) {
+		if (getaddrinfo(ptr, NULL, NULL, &ainfo) != 0)
+			return 0;
+	}
 
 	/* Just use the first one returned. */
 	switch (ainfo->ai_family) {

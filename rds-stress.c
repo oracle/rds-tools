@@ -428,10 +428,13 @@ static unsigned long long parse_ull(char *ptr, unsigned long long max)
 
 static void parse_addr(char *ptr, union sockaddr_ip *addr, bool *isv6)
 {
-	struct addrinfo *ainfo;
+	struct addrinfo *ainfo, hints = {.ai_flags = AI_NUMERICHOST,};
 
-	if (getaddrinfo(ptr, NULL, NULL, &ainfo) != 0)
-		die("invalid host name or address '%s'\n", ptr);
+	/* passing hints to avoid netlink syscall as possible */
+	if (getaddrinfo(ptr, NULL, &hints, &ainfo) != 0) {
+		if (getaddrinfo(ptr, NULL, NULL, &ainfo) != 0)
+			die("invalid host name or address '%s'\n", ptr);
+	}
 
 	/* Just use the first one returned. */
 	switch (ainfo->ai_family) {

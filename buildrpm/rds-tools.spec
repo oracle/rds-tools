@@ -7,8 +7,8 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
-Version:	2.2.0
-Release:	2%{?dist}%{flavor}
+Version:	2.3.0
+Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/

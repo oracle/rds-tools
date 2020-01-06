@@ -8,7 +8,7 @@ Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
 Version:	2.3.0
-Release:	1%{?dist}%{flavor}
+Release:	2%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -61,6 +61,10 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Mon Jan 06 2020 Aron Silverton <aron.silverton@oracle.com> - 5:2.3.0-2
+- rds-tools: Allow rds-ping to set the number of RDS sockets used (Ka-Cheong Poon) [Orabug: 30359242]
+- rds-tools: avoid netlink calls in getaddrinfo (Wengang Wang) [Orabug: 30634764]
+
 * Tue Jun 18 2019 Aron Silverton <aron.silverton@oracle.com> - 5:2.2.0-2
 - spec: Add epoch to package versioning (Aron Silverton) [Orabug: 29921620]
 

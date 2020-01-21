@@ -526,8 +526,8 @@ int main(int argc, char **argv)
 
 			if (errno != ENOSPC) {
 				verbosef(0, stderr,
-					 "%s: Unable get statistics: %s\n",
-					 progname, strerror(errno));
+					 "%s: Unable to get statistics to process the \"%s\" info request: %s\n",
+					 progname, infos[i].description, strerror(errno));
 				invalid_opt = 1;
 				break;
 			}
@@ -538,9 +538,10 @@ int main(int argc, char **argv)
 
 			if (data == NULL) {
 				verbosef(0, stderr,
-					 "%s: Unable to allocate memory "
-					 "for %u bytes of info: %s\n",
-					 progname, len, strerror(errno));
+					 "%s: Unable to allocate %u bytes of memory "
+					 "to process the \"%s\" info request: %s\n",
+					 progname, len, infos[i].description,
+					 strerror(errno));
 				return 1;
 			}
 		}

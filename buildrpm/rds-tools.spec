@@ -7,8 +7,8 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
-Version:	2.3.0
-Release:	2%{?dist}%{flavor}
+Version:	2.3.1
+Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		http://oss.oracle.com/projects/rds/
@@ -61,6 +61,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Mon Feb 03 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.1-1
+- rds-info: error messages need context (Mark Haywood) [Orabug: 30729862]
+
 * Mon Jan 06 2020 Aron Silverton <aron.silverton@oracle.com> - 5:2.3.0-2
 - rds-tools: Allow rds-ping to set the number of RDS sockets used (Ka-Cheong Poon) [Orabug: 30359242]
 - rds-tools: avoid netlink calls in getaddrinfo (Wengang Wang) [Orabug: 30634764]

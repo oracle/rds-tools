@@ -1,9 +1,9 @@
-%define RELEASE 2
+%define RELEASE 1
 %{?el7:%define uektag uek4}
 
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.3.0
+Version:	2.3.1
 Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -52,11 +52,14 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Fri Jan 11 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.0-2
-- rds-ping: Allow rds-ping to set the number of RDS sockets used [Orabug: 30375512]
-- rds-tools: avoid netlink calls in getaddrinfo  [Orabug: 30652283]
+* Mon Feb 03 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.1-1
+- rds-info: error messages need context (Mark Haywood) [Orabug 30822264]
 
-* Thu Jan 17 2019 Aron Silverotn <aron.silverton@oracle.com> - 2.2.0-1
+* Fri Jan 11 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.0-2
+- rds-ping: Allow rds-ping to set the number of RDS sockets used (Ka-Cheong Poon) [Orabug: 30375512]
+- rds-tools: avoid netlink calls in getaddrinfo (Wengang Wang) [Orabug: 30652283]
+
+* Thu Jan 17 2019 Aron Silverton <aron.silverton@oracle.com> - 2.2.0-1
 - rds-info: Display QP Number (Divya Indi) [Orabug: 29201281]
 
 * Fri May 18 2018 Aron Silverton <aron.silverton@oracle.com> - 2.1.1-2

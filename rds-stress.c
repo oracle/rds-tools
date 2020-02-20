@@ -545,7 +545,7 @@ static void init_msg_pattern(struct options_v6 *opts)
 static void encode_hdr(struct header_v6 *dst, const struct header_v6 *hdr,
 		       bool isv6)
 {
-	(void) memset(dst, 0, HEADER_V6_SIZE);
+	memset(dst, 0, isv6 ? HEADER_V6_SIZE : HEADER_SIZE);
 
 	dst->seq = htonl(hdr->seq);
 	if (isv6) {
@@ -576,7 +576,7 @@ static void encode_hdr(struct header_v6 *dst, const struct header_v6 *hdr,
 static void decode_hdr(struct header_v6 *dst, const struct header_v6 *hdr,
 		       bool isv6)
 {
-	memset(dst, 0, HEADER_V6_SIZE);
+	memset(dst, 0, isv6 ? HEADER_V6_SIZE : HEADER_SIZE);
 
 	dst->seq = ntohl(hdr->seq);
 	if (isv6) {

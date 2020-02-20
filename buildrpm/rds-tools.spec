@@ -61,6 +61,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Wed Feb 26 2020 Aron Silverton <aron.silverton@orcle.com> - 5:2.3.1
+- rds-stress: SIGSEGV on OL8 when running IPv4 (Mark Haywood) [Orabug: 30925458]
+
 * Mon Feb 03 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.1-1
 - rds-info: error messages need context (Mark Haywood) [Orabug: 30729862]
 

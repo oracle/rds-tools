@@ -3,7 +3,7 @@
 
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.3.1
+Version:	2.3.2
 Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -52,10 +52,13 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue Mar 03 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.2-1
+- rds-stress: SIGSEGV on OL8 when running IPv4 (Mark Haywood) [Orabug: 30935289]]
+
 * Mon Feb 03 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.1-1
 - rds-info: error messages need context (Mark Haywood) [Orabug 30822264]
 
-* Fri Jan 11 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.0-2
+* Fri Jan 10 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.0-2
 - rds-ping: Allow rds-ping to set the number of RDS sockets used (Ka-Cheong Poon) [Orabug: 30375512]
 - rds-tools: avoid netlink calls in getaddrinfo (Wengang Wang) [Orabug: 30652283]
 

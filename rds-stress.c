@@ -1493,7 +1493,7 @@ static void build_cmsg_async_send(struct msghdr *msg, uint64_t user_token)
 {
 	struct rds_asend_args  args;
 
-	args.flags |= RDS_SEND_NOTIFY_ME;
+	args.flags = RDS_SEND_NOTIFY_ME;
 	args.user_token = user_token;
 	rdma_put_cmsg(msg, RDS_CMSG_ASYNC_SEND, &args, sizeof(args));
 }
@@ -2199,7 +2199,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	}
 
 	/* give main display thread a little edge? */
-	nice(5);
+	(void) !nice(5); /* (void)! avoids unused_result compiler warning */
 
 	/* send to *all* remote tasks */
 	memset(tasks, 0, sizeof(tasks));
@@ -3423,7 +3423,7 @@ static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 	struct timeval stop;
 	uint64_t usecs;
 
-	nice(20);
+	(void) !nice(20); /* (void)! avoids unused_result compiler warning */
 
 	soak->per_sec = 1000;
 

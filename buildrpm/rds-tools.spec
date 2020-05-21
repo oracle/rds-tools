@@ -7,8 +7,8 @@ Version:	2.3.2
 Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
-URL:		http://oss.oracle.com/projects/rds/
-Source0:	http://oss.oracle.com/projects/rds/dist/files/sources/%{name}-%{version}.tar.gz
+URL:		https://github.com/oracle/%{name}
+Source0:	%{name}-%{version}.tar.gz
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 ExcludeArch:	s390 s390x
 

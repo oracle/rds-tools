@@ -1,4 +1,4 @@
-%define RELEASE 1
+%define RELEASE 2
 %{?el7:%define uektag uek4}
 
 Name:		rds-tools
@@ -52,6 +52,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Fri May 22 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.2-2
+- rds-tools: Update URL and Source tags in the spec (Mark Haywood) [Orabug: 30847027]
+
 * Tue Mar 03 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.2-1
 - rds-stress: SIGSEGV on OL8 when running IPv4 (Mark Haywood) [Orabug: 30935289]]
 

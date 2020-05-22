@@ -8,7 +8,7 @@ Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
 Version:	2.3.2
-Release:	1%{?dist}%{flavor}
+Release:	2%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		https://github.com/oracle/%{name}
@@ -61,7 +61,10 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Wed Feb 26 2020 Aron Silverton <aron.silverton@orcle.com> - 5:2.3.2-1
+* Fri May 22 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.2-2
+ - rds-tools: Update URL and Source tags in the spec (Mark Haywood) [Orabug: 30847018]
+
+* Wed Feb 26 2020 Aron Silverton <aron.silverton@oracle.com> - 5:2.3.2-1
 - rds-stress: SIGSEGV on OL8 when running IPv4 (Mark Haywood) [Orabug: 30925458]
 
 * Mon Feb 03 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.1-1

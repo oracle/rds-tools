@@ -3818,13 +3818,6 @@ int main(int argc, char **argv)
 						  opts.starting_port, isv6))
 		die("RDMA not supported by this kernel\n");
 
-	/* We require RDMA to be multiples of the page size for now.
-	 * this is just to simplify debugging, but eventually we
-	 * need to support rdma sizes from 1 to 1meg byte
-	 */
-	if (opts.rdma_size && 0)
-		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
-
 	opt_v6 = opts;
 
 	return active_parent(&opts, soak_arr, isv6);

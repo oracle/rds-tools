@@ -3494,7 +3494,7 @@ void stop_soakers(struct soak_control *soak_arr)
 void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 		char *option)
 {
-	if (size == ~0)
+	if (size == unspec)
 		die("specify %s with %s\n", desc, option);
 	if (size < max)
 		die("%s must be at least %u bytes\n", desc, max);

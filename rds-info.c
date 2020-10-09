@@ -319,8 +319,11 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos", "SL",
 	       "LocalDev", "RemoteDev");
 
-	if (each >= info_len) {
-		printf("  QPNo");
+	if (each < info_len) {
+		if (info_len - each ==  sizeof(ic.dst_qp_num))
+			printf("%10s", "QPNo");
+	} else {
+		printf("%10s%10s", "SrcQPNo", "DstQPNo");
 	}
 
 	printf("\n");
@@ -334,9 +337,13 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ipv6addr(ic6.src_gid),
 			       ipv6addr(ic6.dst_gid));
 
-			if (each >= info_len) {
-				printf("  %d", ic6.qp_num);
+			if (each < info_len) {
+				if (info_len - each ==  sizeof(ic6.dst_qp_num))
+					printf("%10d", ic6.qp_num);
+			} else {
+				printf("%10d%10d", ic6.qp_num, ic6.dst_qp_num);
 			}
+
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic6.max_send_wr);
 				printf(", recv_wr=%u", ic6.max_recv_wr);
@@ -357,9 +364,13 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ipv6addr(ic.src_gid),
 			       ipv6addr(ic.dst_gid));
 
-			if (each >= info_len) {
-				printf("  %d", ic.qp_num);
+			if (each < info_len) {
+				if (info_len - each ==  sizeof(ic.dst_qp_num))
+					printf("%10d", ic.qp_num);
+			} else {
+				printf("%10d%10d", ic.qp_num, ic.dst_qp_num);
 			}
+
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic.max_send_wr);
 				printf(", recv_wr=%u", ic.max_recv_wr);

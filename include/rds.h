@@ -41,6 +41,8 @@
 
 #include <linux/types.h>
 #include <limits.h>
+#include <linux/net.h>
+#include <time.h>
 /* XXX <net/sock.h> was included as part of NETFILTER support (commit f13bbf62)
  * but <net/sock.h> is not exported to uapi, although <linux/rds.h> is
  * (in theory). Is <net/sock.h> needed for user-apps that use netfilter?
@@ -174,8 +176,10 @@ struct rds_cmsg_rx_trace {
 #define RDS6_INFO_SOCKETS		10015
 #define RDS6_INFO_TCP_SOCKETS		10016
 #define RDS6_INFO_IB_CONNECTIONS	10017
+#define RDS_INFO_CONN_PATHS		10020
+#define RDS6_INFO_CONN_PATHS		10021
 
-#define RDS_INFO_LAST			10017
+#define RDS_INFO_LAST			10021
 
 struct rds_info_counter {
 	u_int8_t	name[32];
@@ -324,6 +328,71 @@ struct rds6_info_rdma_connection {
 	uint32_t	w_alloc_ctr;
 	uint32_t	w_free_ctr;
 	int32_t		dst_qp_num;
+};
+
+struct rds_path_info {
+        time_t        attempt_time;
+        time_t        connect_time;
+        time_t        reset_time;
+        uint32_t        disconnect_reason;
+        uint32_t        connect_attempts;
+        unsigned int    index;
+        u_int8_t        flags;
+} __attribute__((packed));
+
+struct rds_info_connection_paths {
+        struct in6_addr local_addr;
+        struct in6_addr peer_addr;
+        u_int8_t        transport[TRANSNAMSIZ];
+        uint8_t         tos;
+        u_int8_t        npaths;
+        struct rds_path_info paths[];
+} __attribute__((packed));
+
+#define MAC_DISCON_REASON       (sizeof(conn_drop_reasons)/sizeof(char *))
+char *conn_drop_reasons[] = {
+	"--",
+	"user reset",
+	"invalid connection state",
+	"failure to move to DOWN state",
+	"connection destroy",
+	"conn_connect failure",
+	"hb timeout",
+	"reconnect timeout",
+	"cancel operation on socket",
+	"race between ESTABLISHED event and drop",
+	"conn is not in CONNECTING state",
+	"qp event",
+	"incoming REQ in CONN_UP state",
+	"incoming REQ in CONNECTING state",
+	"passive setup_qp failure",
+	"rdma_accept failure",
+	"active setup_qp failure",
+	"rdma_connect failure",
+	"resolve_route failure",
+	"detected rdma_cm_id mismatch",
+	"ROUTE_ERROR event",
+	"ADDR_ERROR event",
+	"CONNECT_ERROR or UNREACHABLE or DEVICE_REMOVE event",
+	"CONSUMER_DEFINED reject",
+	"REJECTED event",
+	"ADDR_CHANGE event",
+	"DISCONNECTED event",
+	"TIMEWAIT_EXIT event",
+	"post_recv failure",
+	"send_ack failure",
+	"no header in incoming msg",
+	"corrupted header in incoming msg",
+	"fragment header mismatch",
+	"recv completion error",
+	"send completion error",
+	"post_send failure",
+	"rds_rdma module unload",
+	"active bonding failover",
+	"corresponding loopback conn drop",
+	"active bonding failback",
+	"sk_state to TCP_CLOSE",
+	"tcp_send failure",
 };
 
 /*

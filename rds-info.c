@@ -53,9 +53,10 @@
 
 /* WHUPS changed the struct rds_info_connection definition b/w rds in 1.4 & 1.5. gotta support both
    for now. TODO remove check of transport[15] once ofed pre-1.5 is extinct. */
-#define rds_conn_flag(conn, flag, letter) \
-	(conn.flags & RDS_INFO_CONNECTION_FLAG_##flag \
-	|| conn.transport[15] & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
+
+#define rds_conn_flag(conn_flags, flag, transport, letter) \
+	(conn_flags & RDS_INFO_CONNECTION_FLAG_##flag \
+	|| transport[15] & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
 
 #define min(a, b) (a < b ? a : b)
 #define array_size(foo) (sizeof(foo) / sizeof(foo[0]))
@@ -174,6 +175,80 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 	}
 }
 
+static void print_time(time_t *time)
+{
+	char buf[128];
+
+	if ((*time) == 0) {
+		printf("%-24s ", "---");
+	} else {
+		strftime(buf, sizeof(buf), "%D %H:%M:%S %Z", localtime(time));
+		printf("%-24s ", buf);
+	}
+}
+static void print_paths(void *data, int each, socklen_t len, void *extra,
+			bool prt_ipv6)
+{
+	struct rds_info_connection_paths *rds_cinfo;
+	int prt_width;
+	struct rds_path_info *pinfo;
+
+	printf("\nRDS Paths:\n");
+	if (prt_ipv6)
+		prt_width = PRT_IPV6_WIDTH;
+	else
+		prt_width = PRT_IPV4_WIDTH;
+	while (len) {
+		int i = 0;
+
+		rds_cinfo = (struct rds_info_connection_paths *)data;
+		len -= each;
+		data += each;
+		printf("\t%*s %*s %4s %7s\n", prt_width, "LocalAddr",
+		       prt_width, "RemoteAddr", "Tos", "Trans");
+		printf("\t%*s %*s %4u %7s\n",
+			prt_width, ipaddr(&rds_cinfo->local_addr, 1),
+			prt_width, ipaddr(&rds_cinfo->peer_addr, 1),
+			rds_cinfo->tos,
+			rds_cinfo->transport);
+		printf("\n%-4s %-24s %-24s %-24s %-10s %-6s %-11s %-s\n",
+		       "P", "Connected@", "Attempt@",
+		       "Reset@", "Attempts", "RDS", "Down(Secs)", "Reason");
+		pinfo = (struct rds_path_info *) (rds_cinfo + 1);
+		do {
+			printf("%-4d ", pinfo->index);
+			print_time(&pinfo->connect_time);
+			print_time(&pinfo->attempt_time);
+			print_time(&pinfo->reset_time);
+			printf("%-10d ", pinfo->connect_attempts);
+			printf("%c%c%c%c   ",
+			rds_conn_flag(pinfo->flags, SENDING,
+				      rds_cinfo->transport, 's'),
+			rds_conn_flag(pinfo->flags, CONNECTING,
+				      rds_cinfo->transport, 'c'),
+			rds_conn_flag(pinfo->flags, CONNECTED,
+				      rds_cinfo->transport, 'C'),
+			rds_conn_flag(pinfo->flags, ERROR,
+				      rds_cinfo->transport, 'E'));
+			if ((pinfo->flags & RDS_INFO_CONNECTION_FLAG_CONNECTED) &&
+			    pinfo->reset_time != 0) {
+				printf("%-11ld ",
+				       pinfo->connect_time - pinfo->reset_time);
+			} else {
+				printf("%-11s ", "---");
+			}
+			if (pinfo->disconnect_reason > MAC_DISCON_REASON)
+				printf("%15d\n", pinfo->disconnect_reason);
+			else
+				printf("%-s\n",
+				       conn_drop_reasons[pinfo->disconnect_reason]);
+			pinfo++;
+		} while (++i < rds_cinfo->npaths);
+		if (len)
+			printf("\n");
+	}
+}
+
 static void print_conns(void *data, int each, socklen_t len, void *extra,
 			bool prt_ipv6)
 {
@@ -198,10 +273,14 @@ static void print_conns(void *data, int each, socklen_t len, void *extra,
 			       conn6.tos,
 			       conn6.next_tx_seq,
 			       conn6.next_rx_seq,
-			       rds_conn_flag(conn6, SENDING, 's'),
-			       rds_conn_flag(conn6, CONNECTING, 'c'),
-			       rds_conn_flag(conn6, CONNECTED, 'C'),
-			       rds_conn_flag(conn6, ERROR, 'E'));
+			       rds_conn_flag(conn6.flags, SENDING,
+					     conn6.transport, 's'),
+			       rds_conn_flag(conn6.flags, CONNECTING,
+					     conn6.transport, 'c'),
+			       rds_conn_flag(conn6.flags, CONNECTED,
+					     conn6.transport, 'C'),
+			       rds_conn_flag(conn6.flags, ERROR,
+					     conn6.transport, 'E'));
 		}
 	} else {
 		for_each(conn, data, each, len) {
@@ -211,10 +290,14 @@ static void print_conns(void *data, int each, socklen_t len, void *extra,
 			       conn.tos,
 			       conn.next_tx_seq,
 			       conn.next_rx_seq,
-			       rds_conn_flag(conn, SENDING, 's'),
-			       rds_conn_flag(conn, CONNECTING, 'c'),
-			       rds_conn_flag(conn, CONNECTED, 'C'),
-			       rds_conn_flag(conn, ERROR, 'E'));
+			       rds_conn_flag(conn.flags, SENDING,
+					     conn.transport, 's'),
+			       rds_conn_flag(conn.flags, CONNECTING,
+					     conn.transport, 'c'),
+			       rds_conn_flag(conn.flags, CONNECTED,
+					     conn.transport, 'C'),
+			       rds_conn_flag(conn.flags, ERROR,
+					     conn.transport, 'E'));
 		}
 	}
 }
@@ -407,6 +490,8 @@ struct info infos[] = {
 		print_sockets, NULL, 0 },
 	['n'] = { RDS6_INFO_CONNECTIONS, RDS_INFO_CONNECTIONS, "connections",
 		print_conns, NULL, 0 },
+	['p'] = { RDS6_INFO_CONN_PATHS, RDS_INFO_CONN_PATHS, "paths",
+		print_paths, NULL, 0 },
 	['r'] = { RDS6_INFO_RECV_MESSAGES, RDS_INFO_RECV_MESSAGES,
 		"recv queue messages", print_msgs, "Receive", 0 },
 	['s'] = { RDS6_INFO_SEND_MESSAGES, RDS_INFO_SEND_MESSAGES,

@@ -7,8 +7,8 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
-Version:	2.3.2
-Release:	2%{?dist}%{flavor}
+Version:	2.3.3
+Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		https://github.com/oracle/%{name}
@@ -61,6 +61,11 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue Oct 20 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.3-1
+- rds-stress: Fix compiler warnings (Manjunath Patil) [Orabug: 31393110]
+- rds-info: Display destination qp number (Praveen Kumar Kannoju) [Orabug: 31940566]
+- rds-tools: Added '-p' option to rds-info to show paths (Rao Shoaib) [Orabug: 31650130]
+
 * Fri May 22 2020 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.2-2
  - rds-tools: Update URL and Source tags in the spec (Mark Haywood) [Orabug: 30847018]
 

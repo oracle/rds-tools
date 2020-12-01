@@ -461,26 +461,26 @@ static void usage(void)
 	fprintf(stderr,
 	"\n"
 	"Send & Recv parameters:\n"
-	" -r, --recv-addr [addr]    use this local address\n"
-	" -p, --port [port]         starting port number (default is 4000)\n"
+	" -r, --recv-addr [addr]        use this local address\n"
+	" -p, --port [port]             starting port number (default is 4000)\n"
 	"\n"
 	"Send parameters:\n"
-	" -s, --send-addr [addr]    send to this address (required)\n"
-	" -a, --ack-bytes [bytes]   ack message length\n"
-	" -q, --req-bytes [bytes]   request message length (default is 1024)\n"
-	" -o,                       datagrams sent one way only (default is both)\n"
-	" -d, --depth [depth]       request pipeline depth, nr outstanding (default is 1)\n"
-	" -t, --tasks [nr]          number of child tasks (default is 1)\n"
-	" -T, --time [seconds]      runtime of test, 0 means infinite (default is 0)\n"
-	" -Q, --tos [tos]           Type of Service (default is 0)\n"
-	" -D, --rdma-bytes [bytes]  RDMA: size\n"
-	" -I [iovecs]               RDMA: number of user buffers to target (max 512) (default is 1)\n"
-	" -M [nr]                   RDMA: mode (0=readwrite,1=readonly,2=writeonly) (default is 0)\n"
+	" -s, --send-addr [addr]        send to this address (required)\n"
+	" -a, --ack-bytes [bytes]       ack message length\n"
+	" -q, --req-bytes [bytes]       request message length (default is 1024)\n"
+	" -o, --one-way                 datagrams sent one way only (default is both)\n"
+	" -d, --depth [depth]           request pipeline depth, nr outstanding (default is 1)\n"
+	" -t, --tasks [nr]              number of child tasks (default is 1)\n"
+	" -T, --time [seconds]          runtime of test, 0 means infinite (default is 0)\n"
+	" -Q, --tos [tos]               Type of Service (default is 0)\n"
+	" -D, --rdma-bytes [bytes]      RDMA: size\n"
+	" -I, --rdma-buffers [iovecs]   RDMA: number of user buffers to target (max 512) (default is 1)\n"
+	" -M, --rdma-mode [nr]          RDMA: mode (0=readwrite,1=readonly,2=writeonly) (default is 0)\n"
 	"\n"
 	"Optional flags:\n"
-	" -c, --report-cpu          measure cpu use with per-cpu soak processes\n"
-	" -V, --trace               trace execution\n"
-	" -z, --report-summary      print a summary at end of test only\n"
+	" -c, --report-cpu              measure cpu use with per-cpu soak processes\n"
+	" -V, --trace                   trace execution\n"
+	" -z, --report-summary          print a summary at end of test only\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"
@@ -3522,6 +3522,8 @@ static struct option long_options[] = {
 { "req-bytes",		required_argument,	NULL,	'q'	},
 { "ack-bytes",		required_argument,	NULL,	'a'	},
 { "rdma-bytes",		required_argument,	NULL,	'D'	},
+{ "rdma-buffers",	required_argument,	NULL,	'I'	},
+{ "rdma-mode",   	required_argument,	NULL,	'M'	},
 { "tasks",		required_argument,	NULL,	't'	},
 { "depth",		required_argument,	NULL,	'd'	},
 { "recv-addr",		required_argument,	NULL,	'r'	},
@@ -3534,6 +3536,7 @@ static struct option long_options[] = {
 { "rtprio",		no_argument,		NULL,	'R'	},
 { "verify",		no_argument,		NULL,	'v'	},
 { "trace",		no_argument,		NULL,	'V'	},
+{ "one-way",		no_argument,		NULL,	'o'	},
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },

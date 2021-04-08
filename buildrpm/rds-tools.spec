@@ -3,7 +3,7 @@
 
 Name:		rds-tools
 Summary:	RDS support tools 
-Version:	2.3.3
+Version:	2.3.4
 Release:	%{RELEASE}%{?dist}%{?uektag}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -52,6 +52,11 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Thu Apr 08 2021 Mark Haywood <mark.haywood@oracle.com> - 2.3.4-1
+- rds-stress: Add long option syntax to usage output (Mark Haywood) [Orabug: 32229141]
+- rds-stress: Add long options for the options missing them (Mark Haywood) [Orabug: 32229207]
+- rds-stress: Fix usage to match getopt options (Mark Haywood) [Orabug: 32229225]
+
 * Mon Nov 16 2020 Mark Haywood <mark.haywood@oracle.com> - 2.3.3-1
 - rds-stress: Fix compiler warnings (Manjunath Patil) [Orabug: 31393110]
 - rds-info: Display destination qp number (Praveen Kumar Kannoju) [Orabug: 31940569]

@@ -64,6 +64,12 @@ receiving on the socket, respectively.
 The number of the inode object associated with the socket. Can be used to
 locate the process owning a given socket by searching /proc/*/fd for
 open files referencing a socket with this inode number.
+.It Pid
+The pid of the process that intitially created the socket. Needs kernel
+support to be displayed and will be left blank otherwise.
+.It Comm
+The task_comm of the process associated with the pid. Needs kernel support to
+be displayed and will be left blank otherwise.
 .El
 
 .It Fl n

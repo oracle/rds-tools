@@ -59,6 +59,7 @@
 	|| transport[15] & RDS_INFO_CONNECTION_FLAG_##flag ? letter : '-')
 
 #define min(a, b) (a < b ? a : b)
+#define max(a, b) (a > b ? a : b)
 #define array_size(foo) (sizeof(foo) / sizeof(foo[0]))
 
 #define copy_into(var, data, each) ({			\
@@ -84,6 +85,9 @@ char *progname = "rds-info";
 /* IPv4/v6 address output string width */
 #define PRT_IPV4_WIDTH	15
 #define PRT_IPV6_WIDTH	37
+
+#define PROCPATHLEN 32
+#define TASK_COMM_LEN 16
 
 /* Like inet_ntoa, but can be re-entered several times without clobbering
  * the previously returned string. */
@@ -136,9 +140,36 @@ static void print_counters(void *data, int each, socklen_t len, void *extra,
 		printf("%32s %16"PRIu64"\n", ctr.name, ctr.value);
 }
 
+/* Returns 0 on success. */
+static int get_comm(pid_t pid, char *comm, int sz)
+{
+	char file_path[PROCPATHLEN];
+	size_t size;
+	FILE *fp;
+
+	if (pid == 0)
+		return -1;
+
+	sprintf(file_path, "/proc/%d/comm", pid);
+
+	fp = fopen(file_path, "r");
+	if (!fp)
+		return -1;
+
+	size = fread(comm, sizeof(char), sz, fp);
+	if (ferror(fp))
+		return -1;
+
+	fclose(fp);
+	size = max(size, 1);
+	comm[size - 1] = '\0';
+	return 0;
+}
+
 static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			  bool prt_ipv6)
 {
+	char comm[TASK_COMM_LEN];
 	struct rds6_info_socket sk6;
 	struct rds_info_socket sk;
 	int prt_width;
@@ -148,29 +179,35 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 	else
 		prt_width = PRT_IPV4_WIDTH;
 
-	printf("\nRDS Sockets:\n%*s %5s %*s %5s %10s %10s %8s\n",
+	printf("\nRDS Sockets:\n%*s %5s %*s %5s %10s %10s %8s %10s %16s\n",
 	       prt_width, "BoundAddr", "BPort", prt_width, "ConnAddr", "CPort",
-	       "SndBuf", "RcvBuf", "Inode");
+	       "SndBuf", "RcvBuf", "Inode", "Pid", "Comm");
 
 	if (prt_ipv6) {
 		for_each(sk6, data, each, len) {
-			printf("%*s %5u %*s %5u %10u %10u %8Lu\n",
+			printf("%*s %5u %*s %5u %10u %10u %8llu",
 			       prt_width, ipaddr(&sk6.bound_addr, prt_ipv6),
 			       ntohs(sk6.bound_port),
 			       prt_width, ipaddr(&sk6.connected_addr, prt_ipv6),
 			       ntohs(sk6.connected_port),
 			       sk6.sndbuf, sk6.rcvbuf,
 			       (unsigned long long)sk6.inum);
+			if (get_comm(sk6.pid, comm, TASK_COMM_LEN) != -1)
+				printf(" %10u %16s", sk6.pid, comm);
+			printf("\n");
 		}
 	} else {
 		for_each(sk, data, each, len) {
-			printf("%*s %5u %*s %5u %10u %10u %8Lu\n",
+			printf("%*s %5u %*s %5u %10u %10u %8llu",
 			       prt_width, ipaddr(&sk.bound_addr, prt_ipv6),
 			       ntohs(sk.bound_port),
 			       prt_width, ipaddr(&sk.connected_addr, prt_ipv6),
 			       ntohs(sk.connected_port),
 			       sk.sndbuf, sk.rcvbuf,
 			       (unsigned long long)sk.inum);
+			if (get_comm(sk.pid, comm, TASK_COMM_LEN) != -1)
+				printf(" %10u %16s", sk.pid, comm);
+			printf("\n");
 		}
 	}
 }

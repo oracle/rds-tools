@@ -140,9 +140,44 @@ The source QP number for this connection.
 The destination QP number for this connection.
 .El
 
-If verbose output is requested, per-connection settings such as the
-maximum number of send and receive work requests will be displayed
-in addition.
+If verbose output is requested, additional per-connection information
+will be displayed. These additional fields are documented below.
+
+.Bl -tag -width 4
+.It CacheAllocs
+The total number of cache allocs used by this connection.
+.It RecvAllocCtr
+The RDS IB connection recv ring alloc counter.
+.It RecvFreeCtr
+The RDS IB connection recv ring free counter.
+.It SendAllocCtr
+The RDS IB connection send ring alloc counter.
+.It SendFreeCtr
+The RDS IB connection send ring free counter.
+.It SendBytes
+The total number of bytes sent by this connection.
+.It RecvBytes
+The total number of bytes received by this connection.
+.It RReadBytes
+The total number of RDMA bytes read by this connection.
+.It RWriteBytes
+The total number of RDMA bytes written by this connection.
+.It TxPollTs
+The time in msec from last scq[send completion queue] poll.
+.It RxPollTs
+The time in msec from last rcq[recv completion queue] poll.
+.It TxPollCnt
+The number of scq polls so far, by RDS on this connection.
+.It RxPollCnt
+The number of rcq polls so far, by RDS on this connection.
+.El
+
+The "-I" option also supports the use of the "-o" flag in addition to it
+to allow the user to selectively display the additional fields documented
+above.
+
+Example:	rds-info -I -o "rx_poll_cnt, r_read_bytes, recv_alloc_ctr"
+		rds-info -I -o "cache_allocs, send_bytes, tx_poll_ts"
 
 .It Fl T
 Display the TCP sockets which the TCP transport is using to provide

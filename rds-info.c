@@ -69,6 +69,8 @@
 	__ret;						\
 })
 
+#define kB(a) ((float)a / 1024.0)
+
 #define for_each(var, data, each, len) 			\
 	for (;len > 0 && copy_into(var, data, each);	\
 	     data += each, len -= min(len, each))
@@ -78,7 +80,11 @@
                 fprintf((f), fmt, ##a); \
 } while (0)
 
+#define ADD_FIELD_STR_LEN 256
+
 static int	opt_verbose = 0;
+static int	opt_add;
+char		add_fields[ADD_FIELD_STR_LEN] = "";
 
 char *progname = "rds-info";
 
@@ -432,10 +438,55 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 	else
 		prt_width = PRT_IPV4_WIDTH;
 
+	if (opt_verbose && (!opt_add)) {
+		memset(add_fields, 0, ADD_FIELD_STR_LEN);
+		strcat(add_fields, "cache_allocs");
+		strcat(add_fields, ", recv_alloc_ctr");
+		strcat(add_fields, ", recv_free_ctr");
+		strcat(add_fields, ", send_alloc_ctr");
+		strcat(add_fields, ", send_free_ctr");
+		strcat(add_fields, ", send_bytes");
+		strcat(add_fields, ", recv_bytes");
+		strcat(add_fields, ", r_read_bytes");
+		strcat(add_fields, ", r_write_bytes");
+		strcat(add_fields, ", tx_poll_ts");
+		strcat(add_fields, ", rx_poll_ts");
+		strcat(add_fields, ", tx_poll_cnt");
+		strcat(add_fields, ", rx_poll_cnt");
+	}
 
 	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s %10s %10s",
 	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos", "SL",
 	       "LocalDev", "RemoteDev", "SrcQPNo", "DstQPNo");
+
+	if (opt_add || opt_verbose) {
+		if (strcasestr(add_fields, "cache_allocs"))
+			printf("%15s", "Cache Allocs");
+		if (strcasestr(add_fields, "recv_alloc_ctr"))
+			printf("%15s", "Recv_alloc_ctr");
+		if (strcasestr(add_fields, "recv_free_ctr"))
+			printf("%15s", "Recv_free_ctr");
+		if (strcasestr(add_fields, "send_alloc_ctr"))
+			printf("%15s", "Send_alloc_ctr");
+		if (strcasestr(add_fields, "send_free_ctr"))
+			printf("%15s", "Send_free_ctr");
+		if (strcasestr(add_fields, "send_bytes"))
+			printf("%16s", "Send_bytes KiB");
+		if (strcasestr(add_fields, "recv_bytes"))
+			printf("%16s", "Recv_bytes KiB");
+		if (strcasestr(add_fields, "r_read_bytes"))
+			printf("%19s", "R_read_bytes KiB");
+		if (strcasestr(add_fields, "r_write_bytes"))
+			printf("%19s", "R_write_bytes KiB");
+		if (strcasestr(add_fields, "tx_poll_ts"))
+			printf("%15s", "Tx_poll_ts_ms");
+		if (strcasestr(add_fields, "rx_poll_ts"))
+			printf("%15s", "Rx_poll_ts_ms");
+		if (strcasestr(add_fields, "tx_poll_cnt"))
+			printf("%15s", "Tx_poll_cnt");
+		if (strcasestr(add_fields, "rx_poll_cnt"))
+			printf("%15s", "Rx_poll_cnt");
+	}
 
 	printf("\n");
 
@@ -450,13 +501,33 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ic6.qp_num,
 			       ic6.dst_qp_num);
 
-			if (opt_verbose) {
-				printf("  send_wr=%u", ic6.max_send_wr);
-				printf(", recv_wr=%u", ic6.max_recv_wr);
-				printf(", send_sge=%u", ic6.max_send_sge);
-				printf(", rdma_mr_max=%u", ic6.rdma_mr_max);
-				printf(", rdma_mr_size=%u", ic6.rdma_mr_size);
-				printf(", cache_allocs=%u", ic6.cache_allocs);
+			if (opt_add || opt_verbose) {
+				if (strcasestr(add_fields, "cache_allocs"))
+					printf("%15"PRIu32, ic6.cache_allocs);
+				if (strcasestr(add_fields, "recv_alloc_ctr"))
+					printf("%15"PRIu32, ic6.recv_alloc_ctr);
+				if (strcasestr(add_fields, "recv_free_ctr"))
+					printf("%15"PRIu32, ic6.recv_free_ctr);
+				if (strcasestr(add_fields, "send_alloc_ctr"))
+					printf("%15"PRIu32, ic6.send_alloc_ctr);
+				if (strcasestr(add_fields, "send_free_ctr"))
+					printf("%15"PRIu32, ic6.send_free_ctr);
+				if (strcasestr(add_fields, "send_bytes"))
+					printf("%16.2f", kB(ic6.send_bytes));
+				if (strcasestr(add_fields, "recv_bytes"))
+					printf("%16.2f", kB(ic6.recv_bytes));
+				if (strcasestr(add_fields, "r_read_bytes"))
+					printf("%19.2f", kB(ic6.r_read_bytes));
+				if (strcasestr(add_fields, "r_write_bytes"))
+					printf("%19.2f", kB(ic6.r_write_bytes));
+				if (strcasestr(add_fields, "tx_poll_ts"))
+					printf("%15"PRIu64, ic6.tx_poll_ts);
+				if (strcasestr(add_fields, "rx_poll_ts"))
+					printf("%15"PRIu64, ic6.rx_poll_ts);
+				if (strcasestr(add_fields, "tx_poll_cnt"))
+					printf("%15"PRIu64, ic6.tx_poll_cnt);
+				if (strcasestr(add_fields, "rx_poll_cnt"))
+					printf("%15"PRIu64, ic6.rx_poll_cnt);
 			}
 
 			printf("\n");
@@ -472,13 +543,33 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 			       ic.qp_num,
 			       ic.dst_qp_num);
 
-			if (opt_verbose) {
-				printf("  send_wr=%u", ic.max_send_wr);
-				printf(", recv_wr=%u", ic.max_recv_wr);
-				printf(", send_sge=%u", ic.max_send_sge);
-				printf(", rdma_mr_max=%u", ic.rdma_mr_max);
-				printf(", rdma_mr_size=%u", ic.rdma_mr_size);
-				printf(", cache_allocs=%u", ic.cache_allocs);
+			if (opt_add || opt_verbose) {
+				if (strcasestr(add_fields, "cache_allocs"))
+					printf("%15"PRIu32, ic.cache_allocs);
+				if (strcasestr(add_fields, "recv_alloc_ctr"))
+					printf("%15"PRIu32, ic.recv_alloc_ctr);
+				if (strcasestr(add_fields, "recv_free_ctr"))
+					printf("%15"PRIu32, ic.recv_free_ctr);
+				if (strcasestr(add_fields, "send_alloc_ctr"))
+					printf("%15"PRIu32, ic.send_alloc_ctr);
+				if (strcasestr(add_fields, "send_free_ctr"))
+					printf("%15"PRIu32, ic.send_free_ctr);
+				if (strcasestr(add_fields, "send_bytes"))
+					printf("%16.2f", kB(ic.send_bytes));
+				if (strcasestr(add_fields, "recv_bytes"))
+					printf("%16.2f", kB(ic.recv_bytes));
+				if (strcasestr(add_fields, "r_read_bytes"))
+					printf("%19.2f", kB(ic.r_read_bytes));
+				if (strcasestr(add_fields, "r_write_bytes"))
+					printf("%19.2f", kB(ic.r_write_bytes));
+				if (strcasestr(add_fields, "tx_poll_ts"))
+					printf("%15"PRIu64, ic.tx_poll_ts);
+				if (strcasestr(add_fields, "rx_poll_ts"))
+					printf("%15"PRIu64, ic.rx_poll_ts);
+				if (strcasestr(add_fields, "tx_poll_cnt"))
+					printf("%15"PRIu64, ic.tx_poll_cnt);
+				if (strcasestr(add_fields, "rx_poll_cnt"))
+					printf("%15"PRIu64, ic.rx_poll_cnt);
 			}
 
 			printf("\n");
@@ -546,7 +637,7 @@ static void print_usage(int rc)
 
 int main(int argc, char **argv)
 {
-	char optstring[258] = "av+";
+	char optstring[258] = "ao:v+";
 	int given_options = 0;
 	socklen_t len = 0;
 	void *data = NULL;
@@ -574,6 +665,10 @@ int main(int argc, char **argv)
 
 	while ((c = getopt(argc, argv, optstring)) != EOF) {
 		switch (c) {
+		case 'o':
+			strncpy(add_fields, optarg, (ADD_FIELD_STR_LEN - 1));
+			opt_add++;
+			continue;
 		case 'v':
 			opt_verbose++;
 			continue;

@@ -426,8 +426,6 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 	struct rds6_info_rdma_connection ic6;
 	struct rds_info_rdma_connection ic;
 	int prt_width;
-	int info_len;
-	info_len = sizeof(struct rds_info_rdma_connection);
 
 	if (prt_ipv6)
 		prt_width = PRT_IPV6_WIDTH;
@@ -435,34 +433,22 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 		prt_width = PRT_IPV4_WIDTH;
 
 
-	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s",
+	printf("\nRDS IB Connections:\n%*s %*s %4s %3s %32s %32s %10s %10s",
 	       prt_width, "LocalAddr", prt_width, "RemoteAddr", "Tos", "SL",
-	       "LocalDev", "RemoteDev");
-
-	if (each < info_len) {
-		if (info_len - each ==  sizeof(ic.dst_qp_num))
-			printf("%10s", "QPNo");
-	} else {
-		printf("%10s%10s", "SrcQPNo", "DstQPNo");
-	}
+	       "LocalDev", "RemoteDev", "SrcQPNo", "DstQPNo");
 
 	printf("\n");
 
 	if (prt_ipv6) {
 		for_each(ic6, data, each, len) {
-			printf("%*s %*s %4u %3u %32s %32s",
+			printf("%*s %*s %4u %3u %32s %32s %10d %10d",
 			       prt_width, ipaddr(&ic6.src_addr, prt_ipv6),
 			       prt_width, ipaddr(&ic6.dst_addr, prt_ipv6),
 			       ic6.tos, ic6.sl,
 			       ipv6addr(ic6.src_gid),
-			       ipv6addr(ic6.dst_gid));
-
-			if (each < info_len) {
-				if (info_len - each ==  sizeof(ic6.dst_qp_num))
-					printf("%10d", ic6.qp_num);
-			} else {
-				printf("%10d%10d", ic6.qp_num, ic6.dst_qp_num);
-			}
+			       ipv6addr(ic6.dst_gid),
+			       ic6.qp_num,
+			       ic6.dst_qp_num);
 
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic6.max_send_wr);
@@ -477,19 +463,14 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 		}
 	} else {
 		for_each(ic, data, each, len) {
-			printf("%*s %*s %4u %3u %32s %32s",
+			printf("%*s %*s %4u %3u %32s %32s %10d %10d",
 			       prt_width, ipaddr(&ic.src_addr, prt_ipv6),
 			       prt_width, ipaddr(&ic.dst_addr, prt_ipv6),
 			       ic.tos, ic.sl,
 			       ipv6addr(ic.src_gid),
-			       ipv6addr(ic.dst_gid));
-
-			if (each < info_len) {
-				if (info_len - each ==  sizeof(ic.dst_qp_num))
-					printf("%10d", ic.qp_num);
-			} else {
-				printf("%10d%10d", ic.qp_num, ic.dst_qp_num);
-			}
+			       ipv6addr(ic.dst_gid),
+			       ic.qp_num,
+			       ic.dst_qp_num);
 
 			if (opt_verbose) {
 				printf("  send_wr=%u", ic.max_send_wr);

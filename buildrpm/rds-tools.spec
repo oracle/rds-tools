@@ -8,7 +8,7 @@ Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
 Version:	2.3.5
-Release:	1%{?dist}%{flavor}
+Release:	2%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		https://github.com/oracle/%{name}
@@ -56,8 +56,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
-* Tue May 03 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5
+* Tue May 03 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5-2
 - oracle/spec: Update package descriptions and summaries (Mark Haywood) [Orabug: 34110737]
+- oracle/spec: Rebuild for OL9 (Mark Haywood) [Orabug: 33836216]
 
 * Mon Mar 07 2022  Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5-1
 - rds-info: Add pid and comm fields to rds-info (Rohit Nair) [Orabug: 33504953]

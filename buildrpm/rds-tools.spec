@@ -7,7 +7,7 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools (Oracle Extensions)
-Version:	2.3.4
+Version:	2.3.5
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -61,6 +61,11 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Mon Mar 07 2022  Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5-1
+- rds-info: Add pid and comm fields to rds-info (Rohit Nair) [Orabug: 33504953]
+- rds-info: Fixed missing documentation for rds-info -I (Rohit Nair) [Orabug: 33771194]
+- rds-info: extend rds-info -Iv functionality (Rohit Nair) [Orabug: 33754433]
+
 * Mon Jan 11 2021 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.4-1
 - rds-stress: Add long option syntax to usage output (Mark Haywood) [Orabug: 32218037]
 - rds-stress: Add long options for the options missing them (Mark Haywood) [Orabug: 32218153]

@@ -1510,7 +1510,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg,
 
 static void build_cmsg_async_send(struct msghdr *msg, uint64_t user_token)
 {
-	struct rds_asend_args  args;
+	struct rds_asend_args args;
 
 	args.flags = RDS_SEND_NOTIFY_ME;
 	args.user_token = user_token;
@@ -3513,7 +3513,7 @@ void stop_soakers(struct soak_control *soak_arr)
 void check_size(uint32_t size, uint32_t unspec, uint32_t max, char *desc,
 		char *option)
 {
-	if (size == ~0)
+	if (size == unspec)
 		die("specify %s with %s\n", desc, option);
 	if (size < max)
 		die("%s must be at least %u bytes\n", desc, max);
@@ -3839,13 +3839,6 @@ int main(int argc, char **argv)
 	if (opts.rdma_size && !check_rdma_support(&recv_addr,
 						  opts.starting_port, isv6))
 		die("RDMA not supported by this kernel\n");
-
-	/* We require RDMA to be multiples of the page size for now.
-	 * this is just to simplify debugging, but eventually we
-	 * need to support rdma sizes from 1 to 1meg byte
-	 */
-	if (opts.rdma_size && 0)
-		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
 
 	opt_v6 = opts;
 

@@ -6,8 +6,8 @@ incdir		= $(DESTDIR)@includedir@
 
 all: all-programs
 
-CFLAGS = -O2 -Wall -Iinclude -g
-CPPFLAGS = -DDEBUG_EXE -DRDS_VERSION=\"@VERSION@\" -MD -MP -MF $(@D)/.$(basename $(@F)).d
+CFLAGS = -O2 -Wall -g
+CPPFLAGS = -Iinclude -DRDS_VERSION=\"@VERSION@\" -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
 HEADERS = kernel-list.h pfhack.h include/rds.h
 COMMON_SOURCES = pfhack.c

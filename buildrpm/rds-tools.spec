@@ -6,7 +6,7 @@
 
 Name:		rds-tools
 Epoch:		%{uek5epoch}
-Summary:	RDS support tools (Oracle Extensions)
+Summary:	RDS support tools
 Version:	2.3.5
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
@@ -21,18 +21,13 @@ Various tools for support of the RDS (Reliable Datagram Socket) API.  RDS
 is specific to InfiniBand and iWARP networks and does not work on non-RDMA
 hardware.
 
-For use on Oracle Linux systems running the Oracle Database Virtual OS layer.
-
 %package -n rds-devel
-Summary: Header files for RDS development (Oracle Extensions)
+Summary: Header files for RDS development
 Group: Development/Libraries
 
 %description -n rds-devel
 Header file and manpages for rds and rds-rdma that describe
 how to use the socket interface.
-
-For use on Oracle Linux systems running the Oracle Database Virtual OS layer.
-
 
 %prep
 %setup -q
@@ -61,6 +56,9 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue May 03 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5
+- oracle/spec: Update package descriptions and summaries (Mark Haywood) [Orabug: 34110737]
+
 * Mon Mar 07 2022  Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5-1
 - rds-info: Add pid and comm fields to rds-info (Rohit Nair) [Orabug: 33504953]
 - rds-info: Fixed missing documentation for rds-info -I (Rohit Nair) [Orabug: 33771194]

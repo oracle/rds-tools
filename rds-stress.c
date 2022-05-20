@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <stddef.h>
+#include <signal.h>
 #include "rds.h"
 
 #include "pfhack.h"
@@ -120,6 +121,8 @@ struct options {
         uint32_t        connect_retries;
         uint8_t         tos;
         uint8_t         async;
+        uint8_t         cancel_sent_to;
+        uint32_t        abort_after;
 } __attribute__((packed));
 
 
@@ -154,6 +157,8 @@ struct options_v6 {
         uint32_t        connect_retries;
         uint8_t         tos;
         uint8_t         async;
+        uint8_t         cancel_sent_to;
+        uint32_t        abort_after;
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
@@ -500,6 +505,8 @@ static void usage(void)
 	" --show-perfdata               generate perf data output for script parsing\n"
 	" --reset                       reset the connection and exit\n"
 	" --async                       enable async sends\n"
+	" --cancel-sent-to              child processes issue RDS_CANCEL_SENT_TO. Use Ctrl-C\n"
+	" --abort-after [seconds]       parent process terminates after [seconds] in the midst of operation\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"
@@ -526,10 +533,53 @@ static void set_rt_priority(void)
  * if you have a script parsing the output of rds-stress,
  * and the parent dies).
  */
-static void check_parent(pid_t pid)
+static void check_parent(pid_t pid, int fd,
+			 bool isv6, struct options_v6 *opts)
 {
-	if (pid != getppid())
-		die("parent %u exited\n", pid);
+	union sockaddr_ip sp;
+	size_t sp_size;
+	char addr_str[INET6_ADDRSTRLEN];
+	int port, i;
+	struct timeval start, stop;
+	long elapsed_ms;
+
+	if (pid == getppid())
+		return;
+
+	if (opts->cancel_sent_to && fd >= 0) {
+		for (i = 0; i < opts->nr_tasks; i++) {
+			if (isv6) {
+				sp.addr6_family = AF_INET6;
+				sp.addr6_port = htons(opts->starting_port + 1 + i);
+				sp.addr6_addr = opts->send_addr6;
+				sp.addr6_scope_id = opts->addr_scope_id;
+				sp_size = sizeof(struct sockaddr_in6);
+				if (!inet_ntop(AF_INET6, &sp.addr6_addr,
+					       addr_str, sizeof(addr_str)))
+					snprintf(addr_str, sizeof(addr_str), "<unknown>");
+				port = ntohs(sp.addr6_port);
+			} else {
+				sp.addr4_family = AF_INET;
+				sp.addr4_port = htons(opts->starting_port + 1 + i);
+				sp.addr4_addr = htonl(opts->send_addr);
+				sp_size = sizeof(struct sockaddr_in);
+				if (!inet_ntop(AF_INET, &sp.addr4_addr,
+					       addr_str, sizeof(addr_str)))
+					snprintf(addr_str, sizeof(addr_str), "<unknown>");
+				port = ntohs(sp.addr4_port);
+			}
+
+			gettimeofday(&start, NULL);
+			if (setsockopt(fd, sol, RDS_CANCEL_SENT_TO, &sp, sp_size) != 0)
+				die_errno("RDS_CANCEL_SENT_TO[%d] failed", i);
+			gettimeofday(&stop, NULL);
+			elapsed_ms = (stop.tv_sec - start.tv_sec) * 1000 + (stop.tv_usec - start.tv_usec) / 1000;
+			printf("RDS_CANCEL_SENT_TO(%s:%d)[%d] took %ld msec\n",
+			       addr_str, port, getpid(), elapsed_ms);
+		}
+	}
+
+	die("parent %u exited\n", pid);
 }
 
 /*
@@ -2328,7 +2378,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	ctl->ready = 1;
 
 	while (ctl->start.tv_sec == 0) {
-		check_parent(parent_pid);
+		check_parent(parent_pid, -1, false, NULL);
 		sleep(1);
 	}
 
@@ -2337,13 +2387,16 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	if (tv_cmp(&start, &ctl->start) < 0)
 		usleep(usec_sub(&ctl->start, &start));
 
+	if (opts->cancel_sent_to)
+		signal(SIGINT, SIG_IGN);
+
 	pfd.fd = fd;
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
 		int can_send;
 
-		check_parent(parent_pid);
+		check_parent(parent_pid, fd, isv6, opts);
 
 		ret = poll(&pfd, 1, 1000);
 		if (ret < 0) {
@@ -2774,6 +2827,9 @@ static void release_children_and_wait(struct options_v6 *opts,
 		timerclear(&end);
 	}
 
+	if (opts->abort_after)
+		alarm(opts->abort_after);
+
 	nr_running = opts->nr_tasks;
 	memset(summary, 0, sizeof(summary));
 
@@ -3065,6 +3121,8 @@ static void encode_options(struct options_v6 *dst,
         dst->rdma_vector = htonl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
+	dst->cancel_sent_to = src->cancel_sent_to;
+	dst->abort_after = src->abort_after;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3110,6 +3168,8 @@ static void decode_options(struct options_v6 *dst,
 	dst->rdma_vector = ntohl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
+	dst->cancel_sent_to = src->cancel_sent_to;
+	dst->abort_after = src->abort_after;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3460,7 +3520,7 @@ static void run_soaker(pid_t parent_pid, struct soak_control *soak)
 		if (per_sec > soak->per_sec)
 			soak->per_sec = per_sec;
 
-		check_parent(parent_pid);
+		check_parent(parent_pid, -1, false, NULL);
 	}
 }
 
@@ -3535,6 +3595,8 @@ enum {
         OPT_SHOW_HISTOGRAM,
 	OPT_RESET,
 	OPT_ASYNC,
+	OPT_CANCEL_SENT_TO,
+	OPT_ABORT_AFTER,
 };
 
 static struct option long_options[] = {
@@ -3572,6 +3634,8 @@ static struct option long_options[] = {
 { "show-histogram",     no_argument,            NULL,   OPT_SHOW_HISTOGRAM   },
 { "reset",              no_argument,            NULL,   OPT_RESET },
 { "async",              no_argument,            NULL,   OPT_ASYNC },
+{ "cancel-sent-to",     no_argument,            NULL,   OPT_CANCEL_SENT_TO },
+{ "abort-after",        required_argument,      NULL,   OPT_ABORT_AFTER },
 { NULL }
 };
 
@@ -3638,6 +3702,8 @@ int main(int argc, char **argv)
 	opts.rdma_vector = 1;
 	opts.tos = 0;
 	opts.async = 0;
+	opts.cancel_sent_to = 0;
+	opts.abort_after = 0;
 	strcpy(opts.version, RDS_VERSION);
 
 	rtt_threshold = ~0U;
@@ -3757,6 +3823,12 @@ int main(int argc, char **argv)
 				break;
 			case OPT_ASYNC:
 				opts.async = 1;
+				break;
+			case OPT_CANCEL_SENT_TO:
+				opts.cancel_sent_to = 1;
+				break;
+			case OPT_ABORT_AFTER:
+				opts.abort_after = parse_ull(optarg, (uint32_t)~0);
 				break;
 			case OPT_RDMA_USE_ONCE:
 				opts.rdma_use_once = parse_ull(optarg, 1);

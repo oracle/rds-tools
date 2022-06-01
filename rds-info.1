@@ -64,6 +64,10 @@ receiving on the socket, respectively.
 The number of the inode object associated with the socket. Can be used to
 locate the process owning a given socket by searching /proc/*/fd for
 open files referencing a socket with this inode number.
+.It Cong
+This field displays 1 if a rds socket is in a congested state and 0 otherwise.
+Needs kernel support and will display -1 if the the kernel does not support
+this field.
 .It Pid
 The pid of the process that intitially created the socket. Needs kernel
 support to be displayed and will be left blank otherwise.

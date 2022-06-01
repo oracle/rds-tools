@@ -172,6 +172,20 @@ static int get_comm(pid_t pid, char *comm, int sz)
 	return 0;
 }
 
+/*
+ * On a non supported kernel, the value in the field would be set to 0
+ * and a supported kernel returns -1 to indicate a non-congested state.
+ * Thus we use this function to swap the 0 and -1 values to indicate
+ * a non congested state and a non-supported state.
+ */
+static void get_congested(int *congested)
+{
+	if (*congested == 0)
+		*congested = -1;
+	else if (*congested == -1)
+		*congested = 0;
+}
+
 static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			  bool prt_ipv6)
 {
@@ -185,9 +199,9 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 	else
 		prt_width = PRT_IPV4_WIDTH;
 
-	printf("\nRDS Sockets:\n%*s %5s %*s %5s %10s %10s %8s %10s %16s\n",
+	printf("\nRDS Sockets:\n%*s %5s %*s %5s %10s %10s %8s %8s %10s %16s\n",
 	       prt_width, "BoundAddr", "BPort", prt_width, "ConnAddr", "CPort",
-	       "SndBuf", "RcvBuf", "Inode", "Pid", "Comm");
+	       "SndBuf", "RcvBuf", "Inode", "Cong", "Pid", "Comm");
 
 	if (prt_ipv6) {
 		for_each(sk6, data, each, len) {
@@ -198,6 +212,8 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			       ntohs(sk6.connected_port),
 			       sk6.sndbuf, sk6.rcvbuf,
 			       (unsigned long long)sk6.inum);
+			get_congested(&sk6.cong);
+				printf(" %8d", sk6.cong);
 			if (get_comm(sk6.pid, comm, TASK_COMM_LEN) != -1)
 				printf(" %10u %16s", sk6.pid, comm);
 			printf("\n");
@@ -211,6 +227,8 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			       ntohs(sk.connected_port),
 			       sk.sndbuf, sk.rcvbuf,
 			       (unsigned long long)sk.inum);
+			get_congested(&sk.cong);
+				printf(" %8d", sk.cong);
 			if (get_comm(sk.pid, comm, TASK_COMM_LEN) != -1)
 				printf(" %10u %16s", sk.pid, comm);
 			printf("\n");

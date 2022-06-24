@@ -51,15 +51,6 @@
 #include <netinet/in.h>
 #endif
 
-/* These sparse annotated types shouldn't be in any user
- * visible header file. We should clean this up rather
- * than kludging around them. */
-#ifndef __KERNEL__
-#define __be16	u_int16_t
-#define __be32	u_int32_t
-#define __be64	u_int64_t
-#endif
-
 #define RDS_IB_ABI_VERSION		0x301
 
 #define	SOL_RDS				276
@@ -98,7 +89,7 @@
 
 #define IPPROTO_OKA (142)
 
-typedef u_int8_t         rds_tos_t;
+typedef __u8	rds_tos_t;
 
 /* RDS message Receive Path Latency points */
 enum rds_message_rxpath_latency {
@@ -109,14 +100,14 @@ enum rds_message_rxpath_latency {
 };
 
 struct rds_rx_trace_so {
-	uint8_t rx_traces;
-	uint8_t rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
+	__u8 rx_traces;
+	__u8 rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
 };
 
 struct rds_cmsg_rx_trace {
-	uint8_t rx_traces;
-	uint8_t rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
-	uint64_t rx_trace[RDS_MSG_RX_DGRAM_TRACE_MAX];
+	__u8 rx_traces;
+	__u8 rx_trace_pos[RDS_MSG_RX_DGRAM_TRACE_MAX];
+	__u64 rx_trace[RDS_MSG_RX_DGRAM_TRACE_MAX];
 };
 
 /*
@@ -185,8 +176,8 @@ struct rds_cmsg_rx_trace {
 #define RDS_INFO_LAST			10021
 
 struct rds_info_counter {
-	u_int8_t	name[32];
-	u_int64_t	value;
+	__u8	name[32];
+	__u64	value;
 } __attribute__((packed));
 
 #define RDS_INFO_CONNECTION_FLAG_SENDING	0x01
@@ -197,70 +188,70 @@ struct rds_info_counter {
 #define TRANSNAMSIZ	16
 
 struct rds_info_connection {
-	u_int64_t	next_tx_seq;
-	u_int64_t	next_rx_seq;
+	__u64		next_tx_seq;
+	__u64		next_rx_seq;
 	__be32		laddr;
 	__be32		faddr;
-	u_int8_t	transport[TRANSNAMSIZ];		/* null term ascii */
-	u_int8_t	flags;
-	u_int8_t        tos;
+	__u8		transport[TRANSNAMSIZ];		/* null term ascii */
+	__u8		flags;
+	__u8		tos;
 } __attribute__((packed));
 
 struct rds6_info_connection {
-	uint64_t	next_tx_seq;
-	uint64_t	next_rx_seq;
+	__u64		next_tx_seq;
+	__u64		next_rx_seq;
 	struct in6_addr	laddr;
 	struct in6_addr	faddr;
-	uint8_t		transport[TRANSNAMSIZ];		/* null term ascii */
-	uint8_t		flags;
-	uint8_t		tos;
+	__u8		transport[TRANSNAMSIZ];		/* null term ascii */
+	__u8		flags;
+	__u8		tos;
 } __attribute__((packed));
 
 #define RDS_INFO_MESSAGE_FLAG_ACK               0x01
 #define RDS_INFO_MESSAGE_FLAG_FAST_ACK          0x02
 
 struct rds_info_message {
-	u_int64_t	seq;
-	u_int32_t	len;
+	__u64		seq;
+	__u32		len;
 	__be32		laddr;
 	__be32		faddr;
 	__be16		lport;
 	__be16		fport;
-	u_int8_t	flags;
-	u_int8_t        tos;
+	__u8		flags;
+	__u8		tos;
 } __attribute__((packed));
 
 struct rds6_info_message {
-	uint64_t	seq;
-	uint32_t	len;
+	__u64		seq;
+	__u32		len;
 	struct in6_addr	laddr;
 	struct in6_addr	faddr;
 	__be16		lport;
 	__be16		fport;
-	uint8_t		flags;
-	uint8_t		tos;
+	__u8		flags;
+	__u8		tos;
 } __attribute__((packed));
 
 struct rds_info_socket {
-	u_int32_t	sndbuf;
+	__u32		sndbuf;
 	__be32		bound_addr;
 	__be32		connected_addr;
 	__be16		bound_port;
 	__be16		connected_port;
-	u_int32_t	rcvbuf;
-	u_int64_t	inum;
+	__u32		rcvbuf;
+	__u64		inum;
 	pid_t		pid;
 	int32_t		cong;
 } __attribute__((packed));
 
 struct rds6_info_socket {
-	uint32_t	sndbuf;
+	__u32		sndbuf;
 	struct in6_addr	bound_addr;
 	struct in6_addr	connected_addr;
 	__be16		bound_port;
 	__be16		connected_port;
-	uint32_t	rcvbuf;
-	uint64_t	inum;
+	__u32		rcvbuf;
+	__u64		inum;
 	pid_t		pid;
 	int32_t		cong;
 } __attribute__((packed));
@@ -270,11 +261,11 @@ struct rds_info_tcp_socket {
 	__be16          local_port;
 	__be32          peer_addr;
 	__be16          peer_port;
-	u_int64_t       hdr_rem;
-	u_int64_t       data_rem;
-	u_int32_t       last_sent_nxt;
-	u_int32_t       last_expected_una;
-	u_int32_t       last_seen_una;
+	__u64           hdr_rem;
+	__u64           data_rem;
+	__u32           last_sent_nxt;
+	__u32           last_expected_una;
+	__u32           last_seen_una;
 } __attribute__((packed));
 
 struct rds6_info_tcp_socket {
@@ -282,45 +273,45 @@ struct rds6_info_tcp_socket {
 	__be16		local_port;
 	struct in6_addr	peer_addr;
 	__be16		peer_port;
-	uint64_t	hdr_rem;
-	uint64_t	data_rem;
-	uint32_t	last_sent_nxt;
-	uint32_t	last_expected_una;
-	uint32_t	last_seen_una;
+	__u64           hdr_rem;
+	__u64           data_rem;
+	__u32           last_sent_nxt;
+	__u32           last_expected_una;
+	__u32           last_seen_una;
 } __attribute__((packed));
 
 #define RDS_IB_GID_LEN	16
 struct rds_info_rdma_connection {
 	__be32		src_addr;
 	__be32		dst_addr;
-	uint8_t		src_gid[RDS_IB_GID_LEN];
-	uint8_t		dst_gid[RDS_IB_GID_LEN];
+	__u8		src_gid[RDS_IB_GID_LEN];
+	__u8		dst_gid[RDS_IB_GID_LEN];
 
-	uint32_t	max_send_wr;
-	uint32_t	max_recv_wr;
-	uint32_t	max_send_sge;
-	uint32_t	rdma_mr_max;
-	uint32_t	rdma_mr_size;
-	uint8_t         tos;
-	uint8_t         sl;
-	uint32_t        cache_allocs;
-	uint32_t	frag;
-	uint16_t        flow_ctl_post_credit;
-	uint16_t        flow_ctl_send_credit;
-	int32_t		qp_num;
-	uint32_t        recv_alloc_ctr;
-	uint32_t        recv_free_ctr;
-	int32_t		dst_qp_num;
-	uint32_t	send_alloc_ctr;
-	uint32_t	send_free_ctr;
-	uint64_t	send_bytes;
-	uint64_t	recv_bytes;
-	uint64_t	r_read_bytes;	/* rdma_read_bytes */
-	uint64_t	r_write_bytes;	/* rdma_write_bytes */
-	uint64_t	tx_poll_ts;
-	uint64_t	rx_poll_ts;
-	uint64_t	tx_poll_cnt;
-	uint64_t	rx_poll_cnt;
+	__u32		max_send_wr;
+	__u32		max_recv_wr;
+	__u32		max_send_sge;
+	__u32		rdma_mr_max;
+	__u32		rdma_mr_size;
+	__u8		tos;
+	__u8		sl;
+	__u32		cache_allocs;
+	__u32		frag;
+	__u16		flow_ctl_post_credit;
+	__u16		flow_ctl_send_credit;
+	__s32		qp_num;
+	__u32		recv_alloc_ctr;
+	__u32		recv_free_ctr;
+	__s32		dst_qp_num;
+	__u32		send_alloc_ctr;
+	__u32		send_free_ctr;
+	__u64		send_bytes;
+	__u64		recv_bytes;
+	__u64		r_read_bytes;
+	__u64		r_write_bytes;
+	__u64		tx_poll_ts;
+	__u64		rx_poll_ts;
+	__u64		tx_poll_cnt;
+	__u64		rx_poll_cnt;
 	int32_t		scq_vector;
 	int32_t		rcq_vector;
 };
@@ -328,55 +319,55 @@ struct rds_info_rdma_connection {
 struct rds6_info_rdma_connection {
 	struct in6_addr	src_addr;
 	struct in6_addr	dst_addr;
-	uint8_t		src_gid[RDS_IB_GID_LEN];
-	uint8_t		dst_gid[RDS_IB_GID_LEN];
+	__u8		src_gid[RDS_IB_GID_LEN];
+	__u8		dst_gid[RDS_IB_GID_LEN];
 
-	uint32_t	max_send_wr;
-	uint32_t	max_recv_wr;
-	uint32_t	max_send_sge;
-	uint32_t	rdma_mr_max;
-	uint32_t	rdma_mr_size;
-	uint8_t         tos;
-	uint8_t         sl;
-	uint32_t        cache_allocs;
-	uint32_t	frag;
-	uint16_t        flow_ctl_post_credit;
-	uint16_t        flow_ctl_send_credit;
-	int32_t		qp_num;
-	uint32_t	recv_alloc_ctr;
-	uint32_t	recv_free_ctr;
-	int32_t		dst_qp_num;
-	uint32_t	send_alloc_ctr;
-	uint32_t	send_free_ctr;
-	uint64_t	send_bytes;
-	uint64_t	recv_bytes;
-	uint64_t	r_read_bytes;	/* rdma_read_bytes */
-	uint64_t	r_write_bytes;	/* rdma_write_bytes */
-	uint64_t	tx_poll_ts;
-	uint64_t	rx_poll_ts;
-	uint64_t	tx_poll_cnt;
-	uint64_t	rx_poll_cnt;
+	__u32		max_send_wr;
+	__u32		max_recv_wr;
+	__u32		max_send_sge;
+	__u32		rdma_mr_max;
+	__u32		rdma_mr_size;
+	__u8		tos;
+	__u8		sl;
+	__u32		cache_allocs;
+	__u32		frag;
+	__u16		flow_ctl_post_credit;
+	__u16		flow_ctl_send_credit;
+	__s32		qp_num;
+	__u32		recv_alloc_ctr;
+	__u32		recv_free_ctr;
+	__s32		dst_qp_num;
+	__u32		send_alloc_ctr;
+	__u32		send_free_ctr;
+	__u64		send_bytes;
+	__u64		recv_bytes;
+	__u64		r_read_bytes;
+	__u64		r_write_bytes;
+	__u64		tx_poll_ts;
+	__u64		rx_poll_ts;
+	__u64		tx_poll_cnt;
+	__u64		rx_poll_cnt;
 	int32_t		scq_vector;
 	int32_t		rcq_vector;
 };
 
 struct rds_path_info {
-        time_t        attempt_time;
-        time_t        connect_time;
-        time_t        reset_time;
-        uint32_t        disconnect_reason;
-        uint32_t        connect_attempts;
-        unsigned int    index;
-        u_int8_t        flags;
+	__kernel_time_t	attempt_time;
+	__kernel_time_t	connect_time;
+	__kernel_time_t	reset_time;
+	__u32		disconnect_reason;
+	__u32		connect_attempts;
+	unsigned int	index;
+	__u8		flags;
 } __attribute__((packed));
 
 struct rds_info_connection_paths {
-        struct in6_addr local_addr;
-        struct in6_addr peer_addr;
-        u_int8_t        transport[TRANSNAMSIZ];
-        uint8_t         tos;
-        u_int8_t        npaths;
-        struct rds_path_info paths[];
+	struct in6_addr local_addr;
+	struct in6_addr peer_addr;
+	__u8		transport[TRANSNAMSIZ];
+	__u8		tos;
+	__u8		npaths;
+	struct rds_path_info paths[];
 } __attribute__((packed));
 
 /*
@@ -417,70 +408,70 @@ struct rds_info_connection_paths {
  * (so that the application does not have to worry about
  * alignment).
  */
-typedef u_int64_t	rds_rdma_cookie_t;
+typedef __u64		rds_rdma_cookie_t;
 
 struct rds_iovec {
-	u_int64_t	addr;
-	u_int64_t	bytes;
+	__u64		addr;
+	__u64		bytes;
 };
 
 struct rds_get_mr_args {
 	struct rds_iovec vec;
-	u_int64_t	cookie_addr;
-	uint64_t	flags;
+	__u64		cookie_addr;
+	__u64		flags;
 };
 
 struct rds_get_mr_for_dest_args {
 	struct sockaddr_storage	dest_addr;
 	struct rds_iovec	vec;
-	u_int64_t		cookie_addr;
-	uint64_t		flags;
+	__u64			cookie_addr;
+	__u64			flags;
 };
 
 struct rds_free_mr_args {
 	rds_rdma_cookie_t cookie;
-	u_int64_t	flags;
+	__u64		flags;
 };
 
 struct rds_rdma_args {
 	rds_rdma_cookie_t cookie;
 	struct rds_iovec remote_vec;
-	u_int64_t	local_vec_addr;
-	u_int64_t	nr_local;
-	u_int64_t	flags;
-	u_int64_t	user_token;
+	__u64		local_vec_addr;
+	__u64		nr_local;
+	__u64		flags;
+	__u64		user_token;
 };
 
 struct rds_atomic_args {
 	rds_rdma_cookie_t cookie;
-	uint64_t	local_addr;
-	uint64_t	remote_addr;
-	uint64_t	swap_add;
-	uint64_t	compare;
-	u_int64_t	flags;
-	u_int64_t	user_token;
+	__u64		local_addr;
+	__u64		remote_addr;
+	__u64		swap_add;
+	__u64		compare;
+	__u64		flags;
+	__u64		user_token;
 };
 
 struct rds_reset {
-	u_int8_t	tos;
+	__u8		tos;
 	struct in_addr	src;
 	struct in_addr	dst;
 };
 
 struct rds6_reset {
-	uint8_t	tos;
+	__u8		tos;
 	struct in6_addr	src;
 	struct in6_addr	dst;
 };
 
 struct rds_asend_args {
-	u_int64_t       user_token;
-	u_int64_t       flags;
+	__u64		user_token;
+	__u64		flags;
 };
 
 struct rds_rdma_send_notify {
-	u_int64_t	user_token;
-	int32_t		status;
+	__u64		user_token;
+	__s32		status;
 };
 
 #define RDS_RDMA_SEND_SUCCESS		0
@@ -534,6 +525,5 @@ enum rds_hook_priorities {
 	NF_RDS_PRI_OKA   = 0,
 	NF_RDS_PRI_LAST  = INT_MAX
 };
-
 
 #endif /* IB_RDS_H */

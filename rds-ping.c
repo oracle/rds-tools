@@ -51,6 +51,8 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <limits.h>
+#include <ctype.h>
+
 #include "rds.h"
 
 #include "pfhack.h"
@@ -79,6 +81,7 @@ static unsigned long	opt_count;
 static union sockaddr_ip	opt_srcaddr;
 static union sockaddr_ip	opt_dstaddr;
 static unsigned long	opt_tos = 0;
+static int		opt_trans = -1;
 
 /* For reasons of simplicity, RDS ping does not use a packet
  * payload that is being echoed, the way ICMP does.
@@ -105,6 +108,7 @@ static int	rds_socket(union sockaddr_ip *src, union sockaddr_ip *dst);
 static int	parse_timeval(const char *, struct timeval *);
 static int	parse_long(const char *ptr, unsigned long *);
 static int	parse_addr(const char *ptr, union sockaddr_ip *);
+static int	parse_trans(const char *ptr, int *);
 
 int
 main(int argc, char **argv)
@@ -113,7 +117,7 @@ main(int argc, char **argv)
 	bool src_set = false;
 	bool num_sock_set = false;
 
-	while ((c = getopt(argc, argv, "c:n:i:I:Q:")) != -1) {
+	while ((c = getopt(argc, argv, "c:n:i:x:I:Q:")) != -1) {
 		switch (c) {
 		case 'c':
 			if (!parse_long(optarg, &opt_count))
@@ -137,6 +141,11 @@ main(int argc, char **argv)
 		case 'i':
 			if (!parse_timeval(optarg, &opt_wait))
 				die("Bad wait time <%s>\n", optarg);
+			break;
+
+		case 'x':
+			if (!parse_trans(optarg, &opt_trans))
+				die("Bad Transport value <%s>\n", optarg);
 			break;
 
 		case 'Q':
@@ -331,6 +340,12 @@ rds_socket(union sockaddr_ip *src, union sockaddr_ip *dst)
 	if (fd < 0)
 		die_errno("unable to create RDS socket");
 
+	if (pf == PF_RDS && opt_trans != -1) {
+		if (setsockopt(fd, SOL_RDS, SO_RDS_TRANSPORT,
+			       &opt_trans, sizeof(opt_trans)))
+			die_errno("setsockopt(SO_RDS_TRANSPORT) failed");
+	}
+
 	/* Guess the local source addr if not given. */
 	if (src->addr4.sin_family == AF_UNSPEC) {
 		int ufd;
@@ -414,6 +429,7 @@ usage(const char *complaint)
 		" -c count      limit packet count\n"
 		" -n number     number of RDS sockets used\n"
 		" -I interface  source IP address\n"
+		" -x rdma|tcp   transport to be used\n"
 		" -Q tos	type of service\n",
 		complaint);
 	exit(1);
@@ -471,6 +487,19 @@ parse_long(const char *ptr, unsigned long *ret)
 		return 0;
 
 	*ret = val;
+	return 1;
+}
+
+static int
+parse_trans(const char *ptr, int *ret)
+{
+	if (!strcasecmp(ptr, "tcp"))
+		*ret = RDS_TRANS_TCP;
+	else if (!strcasecmp(ptr, "rdma"))
+		*ret = RDS_TRANS_IB;
+	else
+		return 0;
+
 	return 1;
 }
 

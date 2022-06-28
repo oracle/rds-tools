@@ -10,6 +10,7 @@
 .Bk -words
 .Op Fl c Ar count
 .Op Fl i Ar interval
+.Op Fl x Ar rdma|tcp
 .Op Fl I Ar local_addr
 .Ar remote_addr
 
@@ -59,6 +60,13 @@ to specify a timeout in milliseconds or microseconds, respectively.
 .It
 Specifying a timeout considerably smaller than the packet round-trip
 time will produce unexpected results.
+.It Fl x Ar rdma|tcp
+By default,
+.Nm rds-ping
+will use whatever transport is available, giving RDMA priority over
+TCP. This option can be used to explicitly select which transport
+.Nm rds-ping
+should use.
 .El
 .Sh AUTHORS
 .Nm rds-ping

@@ -7,8 +7,8 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
-Version:	2.3.5
-Release:	2%{?dist}%{flavor}
+Version:	2.3.6
+Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
 URL:		https://github.com/oracle/%{name}
@@ -56,6 +56,12 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue Jul 12 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.6-1
+- rds-stress: Add options "cancel-sent-to" + "abort-after"(Gerd Rausch) [Orabug: 34290037]
+- rds-info: Userspace change to display congested socket on rds-info -k (Rohit Nair) [Orabug: 34281720]
+- rds-ping: add transport option (Rohit Nair) [Orabug: 34325390]
+- rds-stress: add transport option (Rohit Nair) [Orabug: 34334684]
+
 * Tue May 03 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.5-2
 - oracle/spec: Update package descriptions and summaries (Mark Haywood) [Orabug: 34110737]
 - oracle/spec: Rebuild for OL9 (Mark Haywood) [Orabug: 33836216]

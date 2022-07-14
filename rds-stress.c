@@ -121,8 +121,6 @@ struct options {
         uint32_t        connect_retries;
         uint8_t         tos;
         uint8_t         async;
-        uint8_t         cancel_sent_to;
-        uint32_t        abort_after;
 } __attribute__((packed));
 
 
@@ -157,8 +155,6 @@ struct options_v6 {
         uint32_t        connect_retries;
         uint8_t         tos;
         uint8_t         async;
-        uint8_t         cancel_sent_to;
-        uint32_t        abort_after;
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
@@ -172,6 +168,8 @@ static int		control_fd;
 static uint64_t         rtt_threshold;
 static int              show_histogram;
 static int		reset_connection;
+static uint8_t		cancel_sent_to;
+static uint32_t		abort_after;
 static char		peer_version[VERSION_MAX_LEN];
 
 /*
@@ -546,7 +544,7 @@ static void check_parent(pid_t pid, int fd,
 	if (pid == getppid())
 		return;
 
-	if (opts->cancel_sent_to && fd >= 0) {
+	if (cancel_sent_to && fd >= 0) {
 		for (i = 0; i < opts->nr_tasks; i++) {
 			if (isv6) {
 				sp.addr6_family = AF_INET6;
@@ -2387,7 +2385,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	if (tv_cmp(&start, &ctl->start) < 0)
 		usleep(usec_sub(&ctl->start, &start));
 
-	if (opts->cancel_sent_to)
+	if (cancel_sent_to)
 		signal(SIGINT, SIG_IGN);
 
 	pfd.fd = fd;
@@ -2827,8 +2825,8 @@ static void release_children_and_wait(struct options_v6 *opts,
 		timerclear(&end);
 	}
 
-	if (opts->abort_after)
-		alarm(opts->abort_after);
+	if (abort_after)
+		alarm(abort_after);
 
 	nr_running = opts->nr_tasks;
 	memset(summary, 0, sizeof(summary));
@@ -3121,8 +3119,6 @@ static void encode_options(struct options_v6 *dst,
         dst->rdma_vector = htonl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
-	dst->cancel_sent_to = src->cancel_sent_to;
-	dst->abort_after = src->abort_after;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3168,8 +3164,6 @@ static void decode_options(struct options_v6 *dst,
 	dst->rdma_vector = ntohl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
-	dst->cancel_sent_to = src->cancel_sent_to;
-	dst->abort_after = src->abort_after;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3702,13 +3696,13 @@ int main(int argc, char **argv)
 	opts.rdma_vector = 1;
 	opts.tos = 0;
 	opts.async = 0;
-	opts.cancel_sent_to = 0;
-	opts.abort_after = 0;
 	strcpy(opts.version, RDS_VERSION);
 
 	rtt_threshold = ~0U;
 	show_histogram = 0;
 	reset_connection = 0;
+	cancel_sent_to = 0;
+	abort_after = 0;
 
 	while(1) {
 		int c, index;
@@ -3825,10 +3819,10 @@ int main(int argc, char **argv)
 				opts.async = 1;
 				break;
 			case OPT_CANCEL_SENT_TO:
-				opts.cancel_sent_to = 1;
+				cancel_sent_to = 1;
 				break;
 			case OPT_ABORT_AFTER:
-				opts.abort_after = parse_ull(optarg, (uint32_t)~0);
+				abort_after = parse_ull(optarg, (uint32_t)~0);
 				break;
 			case OPT_RDMA_USE_ONCE:
 				opts.rdma_use_once = parse_ull(optarg, 1);

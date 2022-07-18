@@ -16,7 +16,6 @@
 .Op Fl D Ar rdma_bytes
 .Op Fl d Ar queue_depth
 .Op Fl t Ar nr_tasks
-.Op Fl x Ar rdma|tcp
 .Op Fl c
 .Op Fl R
 .Op Fl V
@@ -111,10 +110,6 @@ Specify the duration of the test run. After the specified number of seconds,
 all processes on both ends of the connection will terminate, and the
 active instance will print a summary. By default, rds-stress will keep
 on sending and receiving messages.
-.It Fl x Ar rdma|tcp
-By default, rds-stress will use whatever transport is available, giving
-RDMA priority over TCP. This option can be used to explicitly select
-which transport rds-stress should use.
 .It Fl z
 This flag can be used in conjunction with -T. It suppresses the ongoing
 display of statistics, and prints a summary only.

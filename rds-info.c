@@ -144,7 +144,7 @@ static void print_counters(void *data, int each, socklen_t len, void *extra,
 	printf("\nCounters:\n%32s %16s\n", "CounterName", "Value");
 
 	for_each(ctr, data, each, len)
-		printf("%32s %16"PRIu64"\n", ctr.name, ctr.value);
+	  printf("%32s %16"PRIu64"\n", ctr.name, (uint64_t) ctr.value);
 }
 
 /* Returns 0 on success. */
@@ -380,8 +380,8 @@ static void print_conns(void *data, int each, socklen_t len, void *extra,
 			       prt_width, ipaddr(&conn6.laddr, prt_ipv6),
 			       prt_width, ipaddr(&conn6.faddr, prt_ipv6),
 			       conn6.tos,
-			       conn6.next_tx_seq,
-			       conn6.next_rx_seq,
+			       (uint64_t) conn6.next_tx_seq,
+			       (uint64_t) conn6.next_rx_seq,
 			       rds_conn_flag(conn6.flags, SENDING,
 					     conn6.transport, 's'),
 			       rds_conn_flag(conn6.flags, CONNECTING,
@@ -397,8 +397,8 @@ static void print_conns(void *data, int each, socklen_t len, void *extra,
 			       prt_width, ipaddr(&conn.laddr, prt_ipv6),
 			       prt_width, ipaddr(&conn.faddr, prt_ipv6),
 			       conn.tos,
-			       conn.next_tx_seq,
-			       conn.next_rx_seq,
+			       (uint64_t) conn.next_tx_seq,
+			       (uint64_t) conn.next_rx_seq,
 			       rds_conn_flag(conn.flags, SENDING,
 					     conn.transport, 's'),
 			       rds_conn_flag(conn.flags, CONNECTING,
@@ -436,7 +436,7 @@ static void print_msgs(void *data, int each, socklen_t len, void *extra,
 			       prt_width, ipaddr(&msg6.faddr, prt_ipv6),
 			       ntohs(msg6.fport),
 			       msg6.tos,
-			       msg6.seq, msg6.len);
+			       (uint64_t) msg6.seq, msg6.len);
 		}
 	} else {
 		for_each(msg, data, each, len) {
@@ -446,7 +446,7 @@ static void print_msgs(void *data, int each, socklen_t len, void *extra,
 			       prt_width, ipaddr(&msg.faddr, prt_ipv6),
 			       ntohs(msg.fport),
 			       msg.tos,
-			       msg.seq, msg.len);
+			       (uint64_t) msg.seq, msg.len);
 		}
 	}
 }
@@ -476,7 +476,7 @@ static void print_tcp_socks(void *data, int each, socklen_t len, void *extra,
 			       ntohs(ts6.local_port),
 			       prt_width, ipaddr(&ts6.peer_addr, prt_ipv6),
 			       ntohs(ts6.peer_port),
-			       ts6.hdr_rem, ts6.data_rem, ts6.last_sent_nxt,
+			       (uint64_t) ts6.hdr_rem, (uint64_t) ts6.data_rem, ts6.last_sent_nxt,
 			       ts6.last_expected_una, ts6.last_seen_una);
 		}
 	} else {
@@ -486,7 +486,7 @@ static void print_tcp_socks(void *data, int each, socklen_t len, void *extra,
 			       ntohs(ts.local_port),
 			       prt_width, ipaddr(&ts.peer_addr, prt_ipv6),
 			       ntohs(ts.peer_port),
-			       ts.hdr_rem, ts.data_rem, ts.last_sent_nxt,
+			       (uint64_t) ts.hdr_rem, (uint64_t) ts.data_rem, ts.last_sent_nxt,
 			       ts.last_expected_una, ts.last_seen_una);
 		}
 	}
@@ -593,13 +593,13 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 				if (strcasestr(add_fields, "r_write_bytes"))
 					printf("%19.2f", kB(ic6.r_write_bytes));
 				if (strcasestr(add_fields, "tx_poll_ts"))
-					printf("%15"PRIu64, ic6.tx_poll_ts);
+					printf("%15"PRIu64, (uint64_t) ic6.tx_poll_ts);
 				if (strcasestr(add_fields, "rx_poll_ts"))
-					printf("%15"PRIu64, ic6.rx_poll_ts);
+					printf("%15"PRIu64, (uint64_t) ic6.rx_poll_ts);
 				if (strcasestr(add_fields, "tx_poll_cnt"))
-					printf("%15"PRIu64, ic6.tx_poll_cnt);
+					printf("%15"PRIu64, (uint64_t) ic6.tx_poll_cnt);
 				if (strcasestr(add_fields, "rx_poll_cnt"))
-					printf("%15"PRIu64, ic6.rx_poll_cnt);
+					printf("%15"PRIu64, (uint64_t) ic6.rx_poll_cnt);
 				if (strcasestr(add_fields, "scq_vector"))
 					printf("%15"PRId32, ic6.scq_vector);
 				if (strcasestr(add_fields, "rcq_vector"))
@@ -639,13 +639,13 @@ static void print_ib_conns(void *data, int each, socklen_t len, void *extra,
 				if (strcasestr(add_fields, "r_write_bytes"))
 					printf("%19.2f", kB(ic.r_write_bytes));
 				if (strcasestr(add_fields, "tx_poll_ts"))
-					printf("%15"PRIu64, ic.tx_poll_ts);
+					printf("%15"PRIu64, (uint64_t)ic.tx_poll_ts);
 				if (strcasestr(add_fields, "rx_poll_ts"))
-					printf("%15"PRIu64, ic.rx_poll_ts);
+					printf("%15"PRIu64, (uint64_t) ic.rx_poll_ts);
 				if (strcasestr(add_fields, "tx_poll_cnt"))
-					printf("%15"PRIu64, ic.tx_poll_cnt);
+					printf("%15"PRIu64, (uint64_t) ic.tx_poll_cnt);
 				if (strcasestr(add_fields, "rx_poll_cnt"))
-					printf("%15"PRIu64, ic.rx_poll_cnt);
+					printf("%15"PRIu64, (uint64_t)ic.rx_poll_cnt);
 				if (strcasestr(add_fields, "scq_vector"))
 					printf("%15"PRId32, ic.scq_vector);
 				if (strcasestr(add_fields, "rcq_vector"))

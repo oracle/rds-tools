@@ -46,6 +46,7 @@
  * (in theory). Is <net/sock.h> needed for user-apps that use netfilter?
  */
 #ifdef __KERNEL__
+#include <linux/socket.h>              /* For __kernel_sockaddr_storage. */
 #include <net/sock.h>
 #else
 #include <netinet/in.h>
@@ -422,7 +423,11 @@ struct rds_get_mr_args {
 };
 
 struct rds_get_mr_for_dest_args {
+#ifdef __KERNEL__
+	struct __kernel_sockaddr_storage dest_addr;
+#else
 	struct sockaddr_storage	dest_addr;
+#endif
 	struct rds_iovec	vec;
 	__u64			cookie_addr;
 	__u64			flags;

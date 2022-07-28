@@ -47,6 +47,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "rds.h"
 #include "pfhack.h"

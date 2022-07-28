@@ -41,8 +41,6 @@
 
 #include <linux/types.h>
 #include <limits.h>
-#include <linux/net.h>
-#include <time.h>
 /* XXX <net/sock.h> was included as part of NETFILTER support (commit f13bbf62)
  * but <net/sock.h> is not exported to uapi, although <linux/rds.h> is
  * (in theory). Is <net/sock.h> needed for user-apps that use netfilter?

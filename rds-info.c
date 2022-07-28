@@ -35,6 +35,7 @@
  * vim: noexpandtab sw=8 ts=8 sts=0:
  */
 
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>

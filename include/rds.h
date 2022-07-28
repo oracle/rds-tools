@@ -47,6 +47,8 @@
  */
 #ifdef __KERNEL__
 #include <net/sock.h>
+#else
+#include <netinet/in.h>
 #endif
 
 /* These sparse annotated types shouldn't be in any user

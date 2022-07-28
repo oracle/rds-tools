@@ -469,7 +469,7 @@ static void usage(void)
 	"\n"
 	"General Options:\n"
 	" -s, --send-addr [addr]        send to this address (required by Send)\n"
-	" -a, --ack-bytes [bytes]       ack message length\n"
+	" -a, --ack-bytes [bytes]       ack message length (default is %u for IPv4 and %u for IPv6)\n"
 	" -q, --req-bytes [bytes]       request message length (default is 1024)\n"
 	" -o, --one-way                 datagrams sent one way only (default is both)\n"
 	" -d, --depth [depth]           request pipeline depth, nr outstanding (default is 1)\n"

@@ -247,6 +247,53 @@ static void print_time(time_t *time)
 		printf("%-24s ", buf);
 	}
 }
+
+#define MAC_DISCON_REASON       (sizeof(conn_drop_reasons)/sizeof(char *))
+char *conn_drop_reasons[] = {
+	"--",
+	"user reset",
+	"invalid connection state",
+	"failure to move to DOWN state",
+	"connection destroy",
+	"conn_connect failure",
+	"hb timeout",
+	"reconnect timeout",
+	"cancel operation on socket",
+	"race between ESTABLISHED event and drop",
+	"conn is not in CONNECTING state",
+	"qp event",
+	"incoming REQ in CONN_UP state",
+	"incoming REQ in CONNECTING state",
+	"passive setup_qp failure",
+	"rdma_accept failure",
+	"active setup_qp failure",
+	"rdma_connect failure",
+	"resolve_route failure",
+	"detected rdma_cm_id mismatch",
+	"ROUTE_ERROR event",
+	"ADDR_ERROR event",
+	"CONNECT_ERROR or UNREACHABLE or DEVICE_REMOVE event",
+	"CONSUMER_DEFINED reject",
+	"REJECTED event",
+	"ADDR_CHANGE event",
+	"DISCONNECTED event",
+	"TIMEWAIT_EXIT event",
+	"post_recv failure",
+	"send_ack failure",
+	"no header in incoming msg",
+	"corrupted header in incoming msg",
+	"fragment header mismatch",
+	"recv completion error",
+	"send completion error",
+	"post_send failure",
+	"rds_rdma module unload",
+	"active bonding failover",
+	"corresponding loopback conn drop",
+	"active bonding failback",
+	"sk_state to TCP_CLOSE",
+	"tcp_send failure",
+};
+
 static void print_paths(void *data, int each, socklen_t len, void *extra,
 			bool prt_ipv6)
 {

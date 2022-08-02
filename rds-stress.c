@@ -123,7 +123,6 @@ struct options {
         uint8_t         async;
         uint8_t         cancel_sent_to;
         uint32_t        abort_after;
-	int8_t		trans;
 } __attribute__((packed));
 
 
@@ -160,7 +159,6 @@ struct options_v6 {
         uint8_t         async;
         uint8_t         cancel_sent_to;
         uint32_t        abort_after;
-	int8_t		trans;
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
@@ -433,19 +431,6 @@ static unsigned long long parse_ull(char *ptr, unsigned long long max)
 	die("invalid number '%s'\n", ptr);
 }
 
-static int
-parse_trans(const char *ptr, int *ret)
-{
-	if (!strcasecmp(ptr, "tcp"))
-		*ret = RDS_TRANS_TCP;
-	else if (!strcasecmp(ptr, "rdma"))
-		*ret = RDS_TRANS_IB;
-	else
-		return 0;
-
-	return 1;
-}
-
 static void parse_addr(char *ptr, union sockaddr_ip *addr, bool *isv6)
 {
 	struct addrinfo *ainfo, hints = {.ai_flags = AI_NUMERICHOST,};
@@ -495,7 +480,6 @@ static void usage(void)
 	" -Q, --tos [tos]               Type of Service (default is 0)\n"
 	" --connect-retries [retries]   specify number of connect retries (default is 0)\n"
 	" --use-cong-monitor [enable]   enable/disable congestion monitoring (default is 1)\n"
-	" -x rdma|tcp			transport to be used\n"
 	"\n"
 	"RDMA Specific Options:\n"
 	" -D, --rdma-bytes [bytes]         buffer size\n"
@@ -869,31 +853,6 @@ uint64_t usec_sub(struct timeval *a, struct timeval *b)
 		a->tv_usec - b->tv_usec;
 }
 
-static int rds_bound_socket(int domain, int type, int protocol,
-			    union sockaddr_ip *sp, socklen_t len, int trans)
-{
-	int fd;
-	int sockopt;
-
-	fd = socket(domain, type, protocol);
-	if (fd < 0)
-		die_errno("socket(%d, %d, %d) failed", domain, type, protocol);
-
-	if (trans != -1) {
-		if (setsockopt(fd, SOL_RDS, SO_RDS_TRANSPORT, &trans, sizeof(trans)))
-			die_errno("setsockopt(SO_RDS_TRANSPORT) failed");
-	}
-
-	sockopt = 1;
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt)))
-		die_errno("setsockopt(SO_REUSEADDR) failed");
-
-	if (bind(fd, (struct sockaddr *)sp, len))
-		die_errno("bind() failed");
-
-	return fd;
-}
-
 static int bound_socket(int domain, int type, int protocol,
 			union sockaddr_ip *sp, socklen_t len)
 {
@@ -931,8 +890,7 @@ static int rds_socket(struct options_v6 *opts, union sockaddr_ip *sp,
 	int val;
 	socklen_t optlen;
 
-	fd = rds_bound_socket(pf, SOCK_SEQPACKET, 0, sp,
-			      addr_len, opts->trans);
+	fd = bound_socket(pf, SOCK_SEQPACKET, 0, sp, addr_len);
 
 	bytes = opts->nr_tasks * opts->req_depth *
 		(opts->req_size + opts->ack_size) * 2;
@@ -3165,7 +3123,6 @@ static void encode_options(struct options_v6 *dst,
 	dst->async = src->async;
 	dst->cancel_sent_to = src->cancel_sent_to;
 	dst->abort_after = src->abort_after;
-	dst->trans = src->trans;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3213,7 +3170,6 @@ static void decode_options(struct options_v6 *dst,
 	dst->async = src->async;
 	dst->cancel_sent_to = src->cancel_sent_to;
 	dst->abort_after = src->abort_after;
-	dst->trans = src->trans;
 	if (isv6) {
 		(void) memmove(&dst->send_addr6, &src->send_addr6,
 			       sizeof(dst->send_addr6));
@@ -3271,9 +3227,7 @@ static void reset_conn(struct options_v6 *opts_v6, bool isv6)
 		val.src.s_addr = htonl(opts_v6->receive_addr);
 		val.dst.s_addr = htonl(opts_v6->send_addr);
 	}
-
-	fd = rds_bound_socket(pf, SOCK_SEQPACKET, 0, &sp,
-			      addr_size, opts_v6->trans);
+	fd = bound_socket(pf, SOCK_SEQPACKET, 0, &sp, addr_size);
 
 	if (isv6) {
 		if (setsockopt(fd, sol, RDS6_CONN_RESET, &val6, sizeof(val6)))
@@ -3692,7 +3646,6 @@ int main(int argc, char **argv)
 	union sockaddr_ip recv_addr, send_addr;
 	bool set_send_addr;
 	bool set_recv_addr;
-	bool is_rdma;
 	bool isv6_prev;
 	bool isv6;
 
@@ -3751,19 +3704,16 @@ int main(int argc, char **argv)
 	opts.async = 0;
 	opts.cancel_sent_to = 0;
 	opts.abort_after = 0;
-	opts.trans = -1;
 	strcpy(opts.version, RDS_VERSION);
 
 	rtt_threshold = ~0U;
 	show_histogram = 0;
 	reset_connection = 0;
-	is_rdma = false;
 
 	while(1) {
 		int c, index;
 
-		c = getopt_long(argc, argv,
-				"+a:cD:d:hI:M:op:x:q:Rr:s:t:T:Q:vVz",
+		c = getopt_long(argc, argv, "+a:cD:d:hI:M:op:q:Rr:s:t:T:Q:vVz",
 				long_options, &index);
 		if (c == -1)
 			break;
@@ -3778,7 +3728,6 @@ int main(int argc, char **argv)
 			case 'D':
 				opts.rdma_size = parse_ull(optarg,
 							   (uint32_t)~0);
-				is_rdma = true;
 				break;
 			case 'd':
 				opts.req_depth = parse_ull(optarg,
@@ -3786,11 +3735,9 @@ int main(int argc, char **argv)
 				break;
                         case 'I':
 				opts.rdma_vector = parse_ull(optarg, 512);
-				is_rdma = true;
                                 break;
                         case 'M':
 				opts.rw_mode = parse_ull(optarg, 2);
-				is_rdma = true;
                                 break;
                         case 'o':
 				opts.simplex = 1;
@@ -3798,11 +3745,6 @@ int main(int argc, char **argv)
 			case 'p':
 				opts.starting_port = parse_ull(optarg,
 							       (uint16_t)~0);
-				break;
-			case 'x':
-				if (!parse_trans(optarg, &opts.trans))
-					die("Bad Transport value <%s>\n",
-					    optarg);
 				break;
 			case 'q':
 				opts.req_size = parse_ull(optarg, (uint32_t)~0);
@@ -3890,31 +3832,24 @@ int main(int argc, char **argv)
 				break;
 			case OPT_RDMA_USE_ONCE:
 				opts.rdma_use_once = parse_ull(optarg, 1);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_USE_GET_MR:
 				opts.rdma_use_get_mr = parse_ull(optarg, 1);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_USE_FENCE:
 				opts.rdma_use_fence = parse_ull(optarg, 1);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_CACHE_MRS:
 				opts.rdma_cache_mrs = parse_ull(optarg, 1);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_USE_NOTIFY:
 				(void) parse_ull(optarg, 1);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_ALIGNMENT:
 				opts.rdma_alignment = parse_ull(optarg, sys_page_size);
-				is_rdma = true;
 				break;
 			case OPT_RDMA_KEY_O_METER:
 				opts.rdma_key_o_meter = 1;
-				is_rdma = true;
 				break;
 			case OPT_SHOW_PARAMS:
 				opts.show_params = 1;
@@ -3945,9 +3880,6 @@ int main(int argc, char **argv)
 	if (opts.async && opts.rdma_size && !opts.rdma_use_fence &&
 	    (opts.rw_mode == RDMA_OP_READ || opts.rw_mode == M_RDMA_READWRITE))
 		die("option --async=1 with RDMA Rd require --rdma-use-fence=1\n");
-
-	if (is_rdma && opts.trans == RDS_TRANS_TCP)
-		die("option -x conflicts with other RDMA specific options\n");
 
 	/* the passive parent will read options off the wire */
 	if (!set_send_addr)

@@ -40,15 +40,17 @@
  */
 
 #include <linux/types.h>
-#include <limits.h>
 /* XXX <net/sock.h> was included as part of NETFILTER support (commit f13bbf62)
  * but <net/sock.h> is not exported to uapi, although <linux/rds.h> is
  * (in theory). Is <net/sock.h> needed for user-apps that use netfilter?
  */
 #ifdef __KERNEL__
-#include <linux/socket.h>              /* For __kernel_sockaddr_storage. */
+#include <linux/socket.h>		/* For __kernel_sockaddr_storage. */
+#include <linux/in.h>			/* For struct in_addr. */
+#include <linux/in6.h>			/* For struct in6_addr. */
 #include <net/sock.h>
 #else
+#include <limits.h>
 #include <netinet/in.h>
 #endif
 

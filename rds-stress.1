@@ -8,19 +8,7 @@
 .Sh SYNOPSIS
 .Nm rds-stress
 .Bk -words
-.Op Fl p Ar port_number
-.Op Fl r Ar receive_address
-.Op Fl s Ar send_address
-.Op Fl a Ar ack_bytes
-.Op Fl q Ar request_bytes
-.Op Fl D Ar rdma_bytes
-.Op Fl d Ar queue_depth
-.Op Fl t Ar nr_tasks
-.Op Fl c
-.Op Fl R
-.Op Fl V
-.Op Fl v
-
+.Op Ar OPTIONS
 .Sh DESCRIPTION
 .Nm rds-stress
 sends messages between groups tasks, usually running on seperate
@@ -65,17 +53,17 @@ and a summary is printed.
 Each child maintains outstanding messages to all other children of the other instance.
 They do not send to their siblings.
 .Sh OPTIONS
-The following options are available for use on the command line:
+.Ss Passive Receiver and Active Sender Configuration Options
+The following options are available for use on either the passive receiver or
+active sender command lines, but are not shared between the two:
 .Bl -tag -width Ds
-.It Fl p Ar port_number
+.It Fl p, -port Ar port_number
 Each parent binds a TCP socket to this port number and their respective
 address.  They will trade the negotiated options over this socket.  Each
 child will bind an RDS socket to the range of ports immediately following
-this port number, for as many children as there are.
-.It Fl s Ar send_address
-A connection attempt is made to this address.  Once its complete and the
-options are sent over it then children will be created and work will proceed.
-.It Fl r Ar receive_address
+this port number, for as many children as there are. The default port
+number value is 4000.
+.It Fl r, -recv-addr Ar receive_address
 This specifies the address that messages will be sent from.  If -s is not
 specified then rds-stress waits for a connection on this address before
 proceeding.
@@ -83,56 +71,131 @@ proceeding.
 If this option is not given, rds-stress will choose an appropriate address.
 The passive process will accept connections on all local interfaces, and
 obtain the address once the control connection is established.
+The active process will choose a local address based on the interface through.
+.It Fl -show-histogram
+Prints a round-trip time (RTT) histogram.
+.It Fl -show-outliers Ar rtt-time
+Reports on any RTT exceeding the rtt-time. The default is that there is no
+outlier checking.
+.It Fl -cancel-sent-to
+If used, children processes will issue a "RDS_CANCEL_SENT_TO"
+for each task and report how long that operation took
+together with the destination IP-address and port plus
+the process-id of that child process.
+Since signal SIGINT is ignored by the children processes,
+a user can press Ctrl-C interactively to terminate
+the parent process early and observe the amount of time it
+took to complete "RDS_CANCEL_SENT_TO" in the midst of send
+operations.
+.It Fl -abort-after Ar seconds
+If used, the parent process will arm a timer (alarm(seconds))
+to terminate in the midst of operation.
+This is useful in combination with the "--cancel-sent-to"
+option in order to measure the amount of time spent
+in "RDS_CANCEL_SENT_TO" while send operations are ongoing.
+.El
+.Ss Active Sender Configuration Options
+The following options are available for use on the active sender command line,
+but are shared with the passive receiver instance prior to the test starting.
+.Bl -tag -width Ds
+.It Fl s, -send-addr Ar send_address
+A connection attempt is made to this address.  Once its complete and the
+options are sent over it then children will be created and work will proceed.
+.Pp
+If this option is not given, rds-stress will choose an appropriate address.
+The passive process will accept connections on all local interfaces, and
+obtain the address once the control connection is established.
 The active process will choose a local address based on the interface through
 which it connects to the destination address.
-.It Fl a Ar ack_bytes
+.It Fl a, -ack-bytes Ar ack_bytes
 This specifies the size of the ack messages, in bytes. There is a minimum size
 which depends on the format of the ack messages, which may change over time.
 See section "Message Sizes" below.
-.It Fl q Ar request_bytes
+.It Fl q, -req-bytes Ar request_bytes
 This specifies the size of the request messages, in bytes.
 It also has a minimum size which may change over time.
 See section "Message Sizes" below.
-.It Fl D Ar rdma_bytes
+.It Fl o, -one-way
+Datagrams will be sent one way only. The default is that they are sent
+both ways.
+.It Fl d, -depth Ar queue_depth
+Each child will try to maintain this many sent messages outstanding to each
+of its peers on the remote address. The default depth is 1.
+.It Fl t, -tasks Ar nr_tasks
+Each parent will create this many children tasks. The default number of tasks is 1.
+.It Fl T, -time Ar seconds
+Specify the duration of the test run. After the specified number of seconds,
+all processes on both ends of the connection will terminate, and the
+active instance will print a summary. By default, rds-stress will keep
+on sending and receiving messages.
+.It Fl Q, -tos Ar tos
+Type of Service. The default is 0.
+.It Fl -connect-retries Ar retries
+This can be used to specify the number of times an active sender instance should
+retry on a failed connect. The default is 0, meaning no reties if the connect fails.
+.It Fl -use-cong-monitor Ar enable
+Enable/disable congestion monitoring. The default is 1, meaning enabled.
+.It Fl v, -verify
+With this option enabled, packets are filled with a pattern that is
+verified by the receiver. This check can help detect data corruption
+occuring under high load.
+.It Fl c, -report-cpu
+This causes rds-stress to create child tasks which just consume CPU cycles.
+One task is created for each CPU in the system.  First each child observes the
+maximum rate at which it can consume cycles.  This means that this option
+should only be given on an idle system.  rds-stress can then calculate the CPU
+use of the system by observing the lesser rate at which the children consume
+cycles.  This option is *not* shared between the active sender and passive receiver
+instances. It must be specified on each rds-stress command line.
+.It Fl z, -report-summary
+This flag can be used in conjunction with -T. It suppresses the ongoing
+display of statistics, and prints a summary only.
+.It Fl R, -rtprio
+This tells the rds-stress parent process to run with SCHED_RR priority,
+giving it precedence over the child processes. This is useful when running
+with lots of tasks, where there is a risk of the child processes starving
+the parent, and skewing the results.
+.It Fl V, -trace
+Trace execution.
+.It Fl -show-params
+Print job parameters/options.
+.It Fl -show-perfdata
+Generate perf data output for script parsing.
+.It Fl --reset
+Reset the connection and exit.
+.It Fl --async
+Enable async sends.
+.El
+.Ss RDMA specific Options:
+.Bl -tag -width Ds
+.It Fl D, -rdma-bytes Ar rdma_bytes
 RDSv3 is capable of transmitting part of a message via RDMA directly from
 application buffer to application buffer. This option enables RDMA support
 in rds-stress: request packets include parameters for an RDMA READ or WRITE
 operation, which the receiving process executes at the time the ACK packet
 is sent.
 See section "Message Sizes" below.
-.It Fl d Ar queue_depth
-Each child will try to maintain this many sent messages outstanding to each
-of its peers on the remote address.
-.It Fl t Ar nr_tasks
-Each parent will create this many children tasks.
-.It Fl T Ar seconds
-Specify the duration of the test run. After the specified number of seconds,
-all processes on both ends of the connection will terminate, and the
-active instance will print a summary. By default, rds-stress will keep
-on sending and receiving messages.
-.It Fl z
-This flag can be used in conjunction with -T. It suppresses the ongoing
-display of statistics, and prints a summary only.
-.It Fl c
-This causes rds-stress to create child tasks which just consume CPU cycles.
-One task is created for each CPU in the system.  First each child observes the
-maximum rate at which it can consume cycles.  This means that this option
-should only be given on an idle system.  rds-stress can then calculate the CPU
-use of the system by observing the lesser rate at which the children consume
-cycles.  This option is *not* shared between the active and passive instances.
-It must be specified on each rds-stress command line.
-.It Fl R
-This tells the rds-stress parent process to run with SCHED_RR priority,
-giving it precedence over the child processes. This is useful when running
-with lots of tasks, where there is a risk of the child processes starving
-the parent, and skewing the results.
-.It Fl v
-With this option enabled, packets are filled with a pattern that is
-verified by the receiver. This check can help detect data corruption
-occuring under high load.
+.It Fl I, -rdma-buffers Ar iovecs
+Number of user buffers to target. The max supported is 512. The default is 1.
+.It Fl M, -rdma-mode Ar nr
+Mode (0=readwrite,1=readonly,2=writeonly). The default is 0.
+.It Fl -rdma-use-once Ar enable
+Enable/disable RDMA use_once buffers. The default is 0, meaning disabled.
+.It Fl -rdma-use-get-mr Ar use-get_mr
+Use GET_MR to get RDMA cookie or use new RDMA_MAP control message which
+is more efficient and eliminates a system call. The default is 0, meaning disabled.
+.It Fl -rdma-use-fence Ar enable
+Enable/disable RDMA read fencing. The default is 1, meaning enabled.
+.It Fl -rdma-use-notify Ar enable
+Option is now obsolete as RDMA notifications are always enabled.
+.It Fl -rdma-cache-mrs Ar enable
+Enable/disable reuse of MR handle for all RDMA operations. The default 0, meaning disabled.
+.It Fl -rdma-alignment Ar alignment
+Request a buffer alignment to test unaligned RDMA. The default is 0, meaning disabled.
+.It Fl -rdma-key-o-meter
+Used to track whether RDS zerocopy code issues repeating R_Keys.
 .El
 .Pp
-
 .Ss Message Sizes
 Options which set a message size (such as -a) specify a number of bytes
 by default. By appending \fBK\fP, \fBM\fP, or \fBG\fP, you can specify the size

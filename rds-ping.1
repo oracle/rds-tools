@@ -9,6 +9,7 @@
 .Nm rds-ping
 .Bk -words
 .Op Fl c Ar count
+.Op Fl n Ar sockets
 .Op Fl i Ar interval
 .Op Fl x Ar rdma|tcp
 .Op Fl I Ar local_addr
@@ -34,6 +35,14 @@ Causes
 .Nm rds-ping
 to exit after sending (and receiving) the specified number of
 packets.
+.It Fl n Ar sockets
+Specifies the number of RDS sockets that
+.Nm rds-ping
+uses to ping the remote host. The specified
+number of sockets must be between 1 and 32. The default value is 8
+unless the -c option is specified and is less than 8. In that case,
+the number of RDS sockets will be the same as the count value
+specified by the -c option.
 .It Fl I Ar address
 By default,
 .Nm rds-ping

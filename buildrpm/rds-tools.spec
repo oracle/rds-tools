@@ -7,7 +7,7 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
-Version:	2.3.7
+Version:	2.3.8
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -56,6 +56,22 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Fri Sep 16 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.8-1
+- rds-info: Extend rds-info -Iv functionality to display SCQ and RCQ IRQ vectors (Mark Haywood) [Orabug: 34426225]
+- rds-info: Move the conn_drop_reasons array from rds.h to rds-info.c (Mark Haywood) [Orabug: 34466041]
+- rds-info: Add missing RDS_INFO_* options to rds.h (Mark Haywood) [Orabug: 34466041]
+- rds-info: Remove unnecessary headers from rds.h (Mark Haywood) [Orabug: 34466041]
+- rds-tools: Add missing SO_RDS_TRANSPORT value RDS_TRANS_GAP to rds.h (Mark Haywood) [Orabug: 34466041]
+- rds-tools: Add missing netinet/in.h header to rds.h (Mark Haywood) [Orabug: 34466041]
+- rds-tools: Sync with kernel rds.h version use of annotated types (Mark Haywood) [Orabug: 34466041]
+- rds-info: Cast all __u64 variables when using PRIu64 macro (Mark Haywood) [Orabug: 34466041]
+- rds-tools: Conditionally define __kernel_sockaddr_storage (Mark Haywood) [Orabug: 34466041]
+- rds-tools: Conditionally include kernel header files in rds.h (Mark Haywood) [Orabug: 34466041]
+- rds-info: Fix strcasestr() implicit declaration warning (Mark Haywood) [Orabug: 34484319]
+- rds-stress: Fix usage() message compiler warning (Mark Haywood) [Orabug: 34484319]
+- man: rds-stress man page does not match getopt options (Mark Haywood) [Orabug: 32229516]
+- man: rds-ping man page is missing information '-n' option (Mark Haywood) [Orabug: 32682304]
+
 * Mon Jul 18 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.7-1
 - Revert "rds-stress: add transport option" (Mark Haywood) [Orabug: 34334684]
 - rds-stress: Remove "cancel-sent-to"/"abort-after" as negotiated options (Mark Haywood) [Orabug: 34381733]

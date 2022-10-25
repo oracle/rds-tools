@@ -427,10 +427,11 @@ usage(const char *complaint)
 		"%s\nUsage: rds-ping [options] dst_addr\n"
 		"Options:\n"
 		" -c count      limit packet count\n"
+		" -i timeout    interval to wait (seconds by default) between sends\n"
 		" -n number     number of RDS sockets used\n"
 		" -I interface  source IP address\n"
 		" -x rdma|tcp   transport to be used\n"
-		" -Q tos	type of service\n",
+		" -Q tos        type of service\n",
 		complaint);
 	exit(1);
 }

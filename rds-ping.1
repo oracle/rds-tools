@@ -13,6 +13,7 @@
 .Op Fl i Ar interval
 .Op Fl x Ar rdma|tcp
 .Op Fl I Ar local_addr
+.Op Fl Q Ar tos
 .Ar remote_addr
 
 .Sh DESCRIPTION
@@ -76,6 +77,8 @@ will use whatever transport is available, giving RDMA priority over
 TCP. This option can be used to explicitly select which transport
 .Nm rds-ping
 should use.
+.It Fl Q Ar tos
+This option can be used to request a QoS type. The default is 0.
 .El
 .Sh AUTHORS
 .Nm rds-ping

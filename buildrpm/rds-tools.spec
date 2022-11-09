@@ -15,6 +15,7 @@ URL:		https://github.com/oracle/%{name}
 Source:		%{name}-%{version}.tar.gz
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 ExcludeArch:	s390 s390x
+BuildRequires:	json-c-devel
 
 %description
 Various tools for support of the RDS (Reliable Datagram Socket) API.  RDS

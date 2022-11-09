@@ -45,9 +45,11 @@ distclean: clean
 	rm -f .*.d
 
 
-
-$(PROGRAMS) : % : %.o $(COMMON_OBJECTS)
+rds-info rds-ping : % : %.o $(COMMON_OBJECTS)
 	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+rds-stress : % : %.o $(COMMON_OBJECTS)
+	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^ -ljson-c
 
 LOCAL_DFILES := $(wildcard .*.d)
 ifneq ($(LOCAL_DFILES),)

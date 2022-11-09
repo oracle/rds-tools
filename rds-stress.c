@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <signal.h>
+#include <json-c/json.h>
 #include "rds.h"
 
 #include "pfhack.h"
@@ -52,6 +53,8 @@ enum {
         M_RDMA_WRITE_ONLY
 };
 #define VERSION_MAX_LEN 16 
+#define VERSION_FLAG_PAD 2
+#define JSON_IDENTIFIER 97
 
 struct options {
         char            version[VERSION_MAX_LEN];
@@ -87,6 +90,7 @@ struct options {
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
+	/* When adding new options they also need to be added to rs_options struct */
 } __attribute__((packed));
 
 /*
@@ -97,7 +101,63 @@ struct options {
  */
 #define	OPTIONS_V1_SIZE		offsetof(struct options, tos) - offsetof(struct options, req_depth)
 #define	OPTIONS_V2_SIZE		offsetof(struct options, send_addr6)
+/* When adding a new option to the options struct the OPTIONS_V3_SIZE has to be
+ * updated with the offset to that field.
+ * Ex: #define	OPTIONS_V3_SIZE	offsetof(struct options, new_option)
+ */
 #define	OPTIONS_V3_SIZE		sizeof(struct options)
+
+enum rs_option_type {
+	RS_OPTION_V6ADDR = 0,
+	RS_OPTION_STRING,
+	RS_OPTION_INT8,
+	RS_OPTION_UINT8,
+	RS_OPTION_UINT16,
+	RS_OPTION_UINT32,
+};
+
+struct rs_option {
+	const char *rso_name;
+	enum rs_option_type rso_type;
+	size_t rso_offset;
+};
+
+static struct rs_option rs_options[] = {
+	{ "version", RS_OPTION_STRING, offsetof(struct options, version) },
+	{ "req_depth", RS_OPTION_UINT32, offsetof(struct options, req_depth) },
+	{ "req_size", RS_OPTION_UINT32, offsetof(struct options, req_size) },
+	{ "ack_size", RS_OPTION_UINT32, offsetof(struct options, ack_size) },
+	{ "rdma_size", RS_OPTION_UINT32, offsetof(struct options, rdma_size) },
+	{ "send_addr", RS_OPTION_UINT32, offsetof(struct options, send_addr) },
+	{ "receive_addr", RS_OPTION_UINT32, offsetof(struct options, receive_addr) },
+	{ "starting_port", RS_OPTION_UINT16, offsetof(struct options, starting_port) },
+	{ "nr_tasks", RS_OPTION_UINT16, offsetof(struct options, nr_tasks) },
+	{ "run_time", RS_OPTION_UINT32, offsetof(struct options, run_time) },
+	{ "summary_only", RS_OPTION_UINT8, offsetof(struct options, summary_only) },
+	{ "rtprio", RS_OPTION_UINT8, offsetof(struct options, rtprio) },
+	{ "tracing", RS_OPTION_UINT8, offsetof(struct options, tracing) },
+	{ "verify", RS_OPTION_UINT8, offsetof(struct options, verify) },
+	{ "show_params", RS_OPTION_UINT8, offsetof(struct options, show_params) },
+	{ "show_perfdata", RS_OPTION_UINT8, offsetof(struct options, show_perfdata) },
+	{ "use_cong_monitor", RS_OPTION_UINT8, offsetof(struct options, use_cong_monitor) },
+	{ "rdma_use_once", RS_OPTION_UINT8, offsetof(struct options, rdma_use_once) },
+	{ "rdma_use_get_mr", RS_OPTION_UINT8, offsetof(struct options, rdma_use_get_mr) },
+	{ "rdma_use_fence", RS_OPTION_UINT8, offsetof(struct options, rdma_use_fence) },
+	{ "rdma_cache_mrs", RS_OPTION_UINT8, offsetof(struct options, rdma_cache_mrs) },
+	{ "rdma_key_o_meter", RS_OPTION_UINT8, offsetof(struct options, rdma_key_o_meter) },
+	{ "suppress_warnings", RS_OPTION_UINT8, offsetof(struct options, suppress_warnings) },
+	{ "simplex", RS_OPTION_UINT8, offsetof(struct options, simplex) },
+	{ "rw_mode", RS_OPTION_UINT8, offsetof(struct options, rw_mode) },
+	{ "rdma_vector", RS_OPTION_UINT32, offsetof(struct options, rdma_vector) },
+	{ "rdma_alignment", RS_OPTION_UINT32, offsetof(struct options, rdma_alignment) },
+	{ "connect_retries", RS_OPTION_UINT32, offsetof(struct options, connect_retries) },
+	{ "tos", RS_OPTION_UINT8, offsetof(struct options, tos) },
+	{ "async", RS_OPTION_UINT8, offsetof(struct options, async) },
+	{ "send_addr6", RS_OPTION_V6ADDR, offsetof(struct options, send_addr6) },
+	{ "receive_addr6", RS_OPTION_V6ADDR, offsetof(struct options, receive_addr6) },
+	{ "addr_scope_id ", RS_OPTION_UINT32, offsetof(struct options, addr_scope_id) },
+	{ NULL, 0, 0 }
+};
 
 #define MAX_BUCKETS 16
 
@@ -109,6 +169,7 @@ static int		reset_connection;
 static uint8_t		cancel_sent_to;
 static uint32_t		abort_after;
 static char		peer_version[VERSION_MAX_LEN];
+static int		use_json;
 
 /*
  * Used to represent both IPv4 and IPv6 sockaddr.
@@ -2695,6 +2756,113 @@ get_perfdata(int initialize)
 	get_stats(initialize);
 }
 
+/* Return 0 on string match and non zero value otherwise */
+static int check_json_flag(const char *string)
+{
+	return strncmp(string, "json", sizeof("json"));
+}
+
+static const char *create_json_options(const struct options *opts, struct json_object *jobj)
+{
+	struct rs_option *rso_opt;
+	void *ptr;
+	char addr6[512];
+
+	for (rso_opt = rs_options; rso_opt->rso_name != NULL; rso_opt++) {
+		ptr = (uint8_t *)opts + rso_opt->rso_offset;
+		switch (rso_opt->rso_type) {
+		case RS_OPTION_V6ADDR:
+			inet_ntop(AF_INET6, (struct in6_addr *)ptr, addr6,
+				  sizeof(struct in6_addr));
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_string(addr6));
+			break;
+		case RS_OPTION_STRING:
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_string((char *)ptr));
+			break;
+		case RS_OPTION_INT8:
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_int(*(int8_t *)ptr));
+			break;
+		case RS_OPTION_UINT8:
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_int(*(uint8_t *)ptr));
+			break;
+		case RS_OPTION_UINT16:
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_int(*(uint16_t *)ptr));
+			break;
+		case RS_OPTION_UINT32:
+			json_object_object_add(jobj, rso_opt->rso_name,
+					       json_object_new_int(*(uint32_t *)ptr));
+			break;
+		default:
+			die("create_json_options() option of unknown type %d\n",
+			    rso_opt->rso_type);
+			break;
+		}
+	}
+
+	return json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PRETTY);
+}
+
+static void parse_json_options(const char *json_str, struct options *opts)
+{
+	struct json_object *object;
+	struct json_object *value;
+	struct rs_option *rso_opt;
+	void *ptr;
+
+	object = json_tokener_parse(json_str);
+	for (rso_opt = rs_options; rso_opt->rso_name != NULL; rso_opt++) {
+		if (!json_object_object_get_ex(object, rso_opt->rso_name, &value))
+			continue;
+		ptr = (uint8_t *)opts + rso_opt->rso_offset;
+		switch (rso_opt->rso_type) {
+		case RS_OPTION_V6ADDR:
+			inet_pton(AF_INET6, json_object_get_string(value), (struct in6_addr *)ptr);
+			break;
+		case RS_OPTION_STRING:
+			strcpy((char *)ptr, json_object_get_string(value));
+			break;
+		case RS_OPTION_INT8:
+			*(int8_t *)ptr = json_object_get_int(value);
+			break;
+		case RS_OPTION_UINT8:
+			*(uint8_t *)ptr = json_object_get_int(value);
+			break;
+		case RS_OPTION_UINT16:
+			*(uint16_t *)ptr = json_object_get_int(value);
+			break;
+		case RS_OPTION_UINT32:
+			*(uint32_t *)ptr = json_object_get_int(value);
+			break;
+		default:
+			die("parse_json_options() option of unknown type %d\n",
+			    rso_opt->rso_type);
+			break;
+		}
+	}
+	json_object_put(object);
+}
+
+static void verify_remote_json_options(const char *json_str)
+{
+	struct json_object *object;
+	struct json_object *value;
+	struct rs_option *rso_opt;
+
+	object = json_tokener_parse(json_str);
+
+	for (rso_opt = rs_options; rso_opt->rso_name != NULL; rso_opt++) {
+		if (!json_object_object_get_ex(object, rso_opt->rso_name, &value))
+		  printf("%s field not supported by remote server\n", rso_opt->rso_name);
+	}
+
+	json_object_put(object);
+}
+
 static int reap_one_child(int wflags)
 {
 	pid_t pid;
@@ -3021,9 +3189,35 @@ static void peer_recv(int fd, void *ptr, size_t size, bool check_version)
 	}
 }
 
+static void *peer_json_recv(int fd)
+{
+	int32_t size;
+	ssize_t ret;
+	char *ptr;
+	void *ptr_start;
+
+	ret = read(fd, &size, sizeof(size));
+	if (ret < 0)
+		die_errno("Cannot recv json options size from peer");
+	if (ret == 0)
+		die("Peer unexpectedly closed connection\n");
+
+	ptr_start = calloc(size, sizeof(char));
+	if (!ptr_start)
+		die_errno("Unable to allocate buffer to receive json options");
+
+	for (ptr = ptr_start; size > 0; ptr += ret, size -= ret) {
+		ret = read(fd, ptr, size);
+		if (ret < 0)
+			die_errno("Cannot recv json options from peer");
+		if (ret == 0)
+			die("Peer unexpectedly closed connection\n");
+	}
+	return ptr_start;
+}
+
 static void encode_options(struct options *dst,
-			   const struct options *src,
-			   bool isv6)
+			   const struct options *src)
 {
 	memcpy(dst->version, src->version, VERSION_MAX_LEN);
 	dst->req_depth = htonl(src->req_depth);
@@ -3057,18 +3251,16 @@ static void encode_options(struct options *dst,
         dst->rdma_vector = htonl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
-	if (isv6) {
-		(void) memmove(&dst->send_addr6, &src->send_addr6,
-			       sizeof(dst->send_addr6));
-		(void) memmove(&dst->receive_addr6, &src->receive_addr6,
-			       sizeof(dst->receive_addr6));
-		dst->addr_scope_id = htonl(src->addr_scope_id);
-	}
+
+	(void) memmove(&dst->send_addr6, &src->send_addr6,
+		       sizeof(dst->send_addr6));
+	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
+		       sizeof(dst->receive_addr6));
+	dst->addr_scope_id = htonl(src->addr_scope_id);
 }
 
 static void decode_options(struct options *dst,
-			   const struct options *src,
-			   bool isv6)
+			   const struct options *src)
 {
 	memcpy(dst->version, src->version, VERSION_MAX_LEN);
 	dst->req_depth = ntohl(src->req_depth);
@@ -3102,22 +3294,23 @@ static void decode_options(struct options *dst,
 	dst->rdma_vector = ntohl(src->rdma_vector);
 	dst->tos = src->tos;
 	dst->async = src->async;
-	if (isv6) {
-		(void) memmove(&dst->send_addr6, &src->send_addr6,
-			       sizeof(dst->send_addr6));
-		(void) memmove(&dst->receive_addr6, &src->receive_addr6,
-			       sizeof(dst->receive_addr6));
-		dst->addr_scope_id = ntohl(src->addr_scope_id);
-	}
+
+	(void) memmove(&dst->send_addr6, &src->send_addr6,
+		       sizeof(dst->send_addr6));
+	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
+		       sizeof(dst->receive_addr6));
+	dst->addr_scope_id = ntohl(src->addr_scope_id);
+
 }
 
-static void verify_option_encdec(const struct options *opts, bool isv6)
+static void verify_option_encdec(const struct options *opts)
 {
-	struct options ebuf, dbuf;
+	struct options ebuf;
+	struct options dbuf;
 	size_t opt_size;
 	unsigned int i;
 
-	opt_size = isv6 ? OPTIONS_V3_SIZE : OPTIONS_V2_SIZE;
+	opt_size = sizeof(struct options);
 	(void) memcpy(&dbuf, opts, opt_size);
 	for (i = 0; i < opt_size; ++i) {
 		unsigned char *x = &((unsigned char *) &dbuf)[i];
@@ -3125,8 +3318,8 @@ static void verify_option_encdec(const struct options *opts, bool isv6)
 		*x = ~*x;
 	}
 
-	encode_options(&ebuf, opts, isv6);
-	decode_options(&dbuf, &ebuf, isv6);
+	encode_options(&ebuf, opts);
+	decode_options(&dbuf, &ebuf);
 
 	if (memcmp(&dbuf, opts, opt_size))
 		die("encode/decode check of options struct failed\n");
@@ -3170,19 +3363,57 @@ static void reset_conn(struct options *opts, bool isv6)
 	}
 }
 
+static void peer_json_send(const char *json_options, int fd)
+{
+	int json_options_len, json_string_len;
+	void *options;
+
+	json_string_len = strlen(json_options);
+	json_options_len = json_string_len + sizeof(json_string_len);
+	options = calloc(json_options_len, sizeof(char));
+	if (!options)
+		die_errno("Unable to allocate buffer to send json options");
+	memcpy(options, &json_string_len, sizeof(json_string_len));
+	memcpy(options + sizeof(json_string_len), json_options, json_string_len);
+	peer_send(fd, options, json_options_len);
+
+	free(options);
+}
+
+static char *create_json_string(const struct options *opts)
+{
+	const char *json_options_ptr;
+	char *json_options;
+	struct json_object *jobj;
+
+	jobj = json_object_new_object();
+	json_options_ptr = create_json_options(opts, jobj);
+	json_options = (char *)calloc((strlen(json_options_ptr) + 1), sizeof(char));
+	if (!json_options)
+		die_errno("Unable to allocate buffer for json options");
+	strncpy(json_options, json_options_ptr, strlen(json_options_ptr));
+	json_object_put(jobj);
+
+	return json_options;
+}
+
 /* If isv6 is false, the parameter opts's receive_addr6 and send_addr6 are
  * invalid.  If isv6 is true, the parameter opts's receive_addr and
  * send_addr are invalid.
  */
 static int active_parent(struct options *opts,
 			 struct soak_control *soak_arr,
-			 bool isv6)
+			 bool isv6,
+			 char *json_options)
 {
 	struct options enc_options;
+	char *remote_json_options;
 	struct child_control *ctl;
 	union sockaddr_ip sp;
 	int fd;
 	uint8_t ok;
+
+	ok = 0;
 
 	if (reset_connection) {
 		reset_conn(opts, isv6);
@@ -3227,7 +3458,7 @@ static int active_parent(struct options *opts,
 
 	/* Make sure that when we add new options, we don't forget
 	 * to add them to the encode/decode routines. */
-	verify_option_encdec(opts, isv6);
+	verify_option_encdec(opts);
 
 	if (isv6) {
 		sp.addr6_family = AF_INET6;
@@ -3272,17 +3503,14 @@ static int active_parent(struct options *opts,
 	/* "negotiation" is overstating things a bit :-)
 	 * We just tell the peer what options to use.
 	 */
-	encode_options(&enc_options, opts, isv6);
+	encode_options(&enc_options, opts);
 	/* Use the new options_v6 to send to IPv6 peer. */
-	if (isv6 || opts->tos || opts->async)
+	if (isv6 || opts->tos || opts->async || use_json)
 		peer_send(fd, &enc_options, isv6 ? OPTIONS_V3_SIZE :
 			  OPTIONS_V2_SIZE);
 	else
 		peer_send(fd, &enc_options.req_depth,
 			  OPTIONS_V1_SIZE);
-
-	printf("negotiated options, tasks will start in 2 seconds\n");
-	ctl = start_children(opts, 1, isv6);
 
 	/* Tell the peer to start up. This is necessary when testing
 	 * with a large number of tasks, because otherwise the peer
@@ -3290,6 +3518,37 @@ static int active_parent(struct options *opts,
 	 */
 	peer_send(fd, &ok, sizeof(ok));
 	peer_recv(fd, &ok, sizeof(ok), false);
+
+	/* We exchange the options using the old method for backward
+	 * compatibility. If the remote_peer supports json exchange
+	 * it will send a unique identifier which is received in the
+	 * peer_recv(ok) call. Based on the value received we either
+	 * send the new json options or continue as expected.
+	 */
+
+	if (use_json && ok == JSON_IDENTIFIER) {
+		trace("RDS: passive_parent support json exchange. json options will be exchanged.\n");
+
+		peer_json_send(json_options, fd);
+		printf("negotiated options, tasks will start in 2 seconds\n");
+		ctl = start_children(opts, 1, isv6);
+
+		free(json_options);
+
+		remote_json_options = peer_json_recv(fd);
+		verify_remote_json_options(remote_json_options);
+		free(remote_json_options);
+
+		peer_send(fd, &ok, sizeof(ok));
+		peer_recv(fd, &ok, sizeof(ok), false);
+
+	} else if (use_json) {
+		free(json_options);
+		die("Remote server does not support json option exchange.\n");
+	} else {
+		printf("negotiated options, tasks will start in 2 seconds\n");
+		ctl = start_children(opts, 1, isv6);
+	}
 
 	release_children_and_wait(opts, ctl, soak_arr, 1);
 
@@ -3300,12 +3559,15 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 			  struct soak_control *soak_arr, bool isv6)
 {
 	struct options remote_v6, *opts;
-	struct child_control *ctl;
+	struct child_control *ctl = NULL;
 	union sockaddr_ip sp;
 	socklen_t socklen;
 	int lfd, fd;
-	uint8_t ok;
+	uint8_t ok = 0;
+	char *json_options;
 	char prt_addr[INET6_ADDRSTRLEN];
+	void *remote_json_options;
+	int json_flag_offset = sizeof(RDS_VERSION) + VERSION_FLAG_PAD;
 
 	if (isv6) {
 		sp.addr6_family = AF_INET6;
@@ -3392,7 +3654,7 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 	if (isv6) {
 		/* For IPv6 peer, send struct options_v6 */
 		peer_recv(fd, &remote_v6, OPTIONS_V3_SIZE, true);
-		decode_options(&remote_v6, &remote_v6, isv6);
+		decode_options(&remote_v6, &remote_v6);
 		opts = &remote_v6;
 		opts->send_addr6 = opts->receive_addr6;
 		opts->receive_addr6 = addr->addr6_addr;
@@ -3400,7 +3662,7 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 	} else {
 		/* For IPv4 peer, send struct options */
 		peer_recv(fd, &remote_v6, OPTIONS_V2_SIZE, true);
-		decode_options(&remote_v6, &remote_v6, isv6);
+		decode_options(&remote_v6, &remote_v6);
 		opts = &remote_v6;
 		opts->send_addr = opts->receive_addr;
 		opts->receive_addr = ntohl(addr->addr4_addr);
@@ -3408,11 +3670,47 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 
 	rds_stress_opts = *opts;
 
-	ctl = start_children(opts, 0, isv6);
-
 	/* Wait for "GO" from the initiating peer */
 	peer_recv(fd, &ok, sizeof(ok), false);
+
+	/* We check the peer_version string for the presence of the json
+	 * flag. If the json flag is set, the active_parent supports json
+	 * exchange and we need to send the JSON_IDENTIFIER back in the
+	 * peer_send(ok) call to intiate the json options exchange.
+	 * If the flag is absent, we contiue execution normally without
+	 * the json option exchange.
+	 */
+
+	if (!check_json_flag((char *)peer_version + json_flag_offset))
+		ok = JSON_IDENTIFIER;
+
+	if (ok != JSON_IDENTIFIER)
+		ctl = start_children(opts, 0, isv6);
+
 	peer_send(fd, &ok, sizeof(ok));
+
+	if (ok == JSON_IDENTIFIER) {
+		remote_json_options = peer_json_recv(fd);
+		parse_json_options(remote_json_options, opts);
+		free(remote_json_options);
+		trace("RDS:%s received json_options\n", __func__);
+		if (isv6) {
+			opts->send_addr6 = opts->receive_addr6;
+			opts->receive_addr6 = addr->addr6_addr;
+			opts->addr_scope_id = addr->addr6.sin6_scope_id;
+		} else {
+			opts->send_addr = opts->receive_addr;
+			opts->receive_addr = ntohl(addr->addr4_addr);
+		}
+
+		json_options = create_json_string(opts);
+		peer_json_send(json_options, fd);
+		free(json_options);
+
+		ctl = start_children(opts, 0, isv6);
+		peer_recv(fd, &ok, sizeof(ok), false);
+		peer_send(fd, &ok, sizeof(ok));
+	}
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
 	release_children_and_wait(opts, ctl, soak_arr, 0);
@@ -3576,6 +3874,7 @@ int main(int argc, char **argv)
 	struct options opts;
 	struct soak_control *soak_arr = NULL;
 	union sockaddr_ip recv_addr, send_addr;
+	char *json_options = NULL;
 	bool set_send_addr;
 	bool set_recv_addr;
 	bool isv6_prev;
@@ -3633,6 +3932,7 @@ int main(int argc, char **argv)
 	opts.rdma_vector = 1;
 	opts.tos = 0;
 	opts.async = 0;
+	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 
 	rtt_threshold = ~0U;
@@ -3640,6 +3940,10 @@ int main(int argc, char **argv)
 	reset_connection = 0;
 	cancel_sent_to = 0;
 	abort_after = 0;
+	/* Set use_json to 1 when adding a new option utilizing
+	 * the json option exchange mechanism.
+	 */
+	use_json = 0;
 
 	while(1) {
 		int c, index;
@@ -3852,5 +4156,17 @@ int main(int argc, char **argv)
 
 	rds_stress_opts = opts;
 
-	return active_parent(&opts, soak_arr, isv6);
+	/* If json options was requested we encode a unique flag "json"
+	 * onto the opts.version that will be checked by the remote node
+	 * to confirm json exchange support for both nodes.
+	 */
+	if (use_json) {
+		int json_flag_offset = sizeof(RDS_VERSION) + VERSION_FLAG_PAD;
+
+		trace("RDS: rds-stress will use json option exchange\n");
+		strcpy(opts.version + json_flag_offset, "json");
+		json_options = create_json_string(&opts);
+	}
+
+	return active_parent(&opts, soak_arr, isv6, json_options);
 }

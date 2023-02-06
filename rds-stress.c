@@ -53,78 +53,7 @@ enum {
 };
 #define VERSION_MAX_LEN 16 
 
-/* Note that there is no IPv6 version of options_2_0_6. */
-struct options_2_0_6 {
-	uint32_t	req_depth;
-	uint32_t	req_size;
-	uint32_t	ack_size;
-	uint32_t	rdma_size;
-	uint32_t	send_addr;
-	uint32_t	receive_addr;
-	uint16_t	starting_port;
-	uint16_t	nr_tasks;
-	uint32_t	run_time;
-	uint8_t		summary_only;
-	uint8_t		rtprio;
-	uint8_t		tracing;
-	uint8_t		verify;
-	uint8_t		show_params;
-	uint8_t		show_perfdata;
-	uint8_t		use_cong_monitor;
-	uint8_t		rdma_use_once;
-	uint8_t		rdma_use_get_mr;
-	uint8_t		rdma_use_fence;
-	uint8_t		rdma_cache_mrs;
-	uint8_t		rdma_key_o_meter;
-	uint8_t		suppress_warnings;
-        uint8_t         simplex;
-        uint8_t         rw_mode;
-	uint32_t        rdma_vector;
-	uint32_t	rdma_alignment;
-	uint32_t	connect_retries;
-} __attribute__((packed));
-
-/* For backward compatibility, struct options is kept unchanged such that it
- * can be sent over the wire to an old peer using IPv4.  IPv6 peer will be
- * sent struct options_v6.  Note that struct options_v6 has the exact same
- * members (and position) of struct options so that one can be cast to another.
- * Hence both structures must be kept in sync.
- */
 struct options {
-	char		version[VERSION_MAX_LEN];
-        uint32_t        req_depth;
-        uint32_t        req_size;
-        uint32_t        ack_size;
-        uint32_t        rdma_size;
-        uint32_t        send_addr;
-        uint32_t        receive_addr;
-        uint16_t        starting_port;
-        uint16_t        nr_tasks;
-        uint32_t        run_time;
-        uint8_t         summary_only;
-        uint8_t         rtprio;
-        uint8_t         tracing;
-        uint8_t         verify;
-        uint8_t         show_params;
-        uint8_t         show_perfdata;
-        uint8_t         use_cong_monitor;
-        uint8_t         rdma_use_once;
-        uint8_t         rdma_use_get_mr;
-        uint8_t         rdma_use_fence;
-        uint8_t         rdma_cache_mrs;
-        uint8_t         rdma_key_o_meter;
-        uint8_t         suppress_warnings;
-        uint8_t         simplex;
-        uint8_t         rw_mode;
-        uint32_t        rdma_vector;
-        uint32_t        rdma_alignment;
-        uint32_t        connect_retries;
-        uint8_t         tos;
-        uint8_t         async;
-} __attribute__((packed));
-
-
-struct options_v6 {
         char            version[VERSION_MAX_LEN];
         uint32_t        req_depth;
         uint32_t        req_size;
@@ -160,10 +89,19 @@ struct options_v6 {
         uint32_t        addr_scope_id;	/* only meaningful locally */
 } __attribute__((packed));
 
+/*
+ * There have been three version of the options structure. The first one had no version,
+ * tos or async which were added in version two. The third version added the IPv6 support
+ * with send_addr6, receive_addr6 and addr_scope_id fields. The structure needs to be
+ * capable of running against servers running any of the versions.
+ */
+#define	OPTIONS_V1_SIZE		offsetof(struct options, tos) - offsetof(struct options, req_depth)
+#define	OPTIONS_V2_SIZE		offsetof(struct options, send_addr6)
+#define	OPTIONS_V3_SIZE		sizeof(struct options)
 
 #define MAX_BUCKETS 16
 
-static struct options_v6	opt_v6;
+static struct options	rds_stress_opts;
 static int		control_fd;
 static uint64_t         rtt_threshold;
 static int              show_histogram;
@@ -363,7 +301,7 @@ struct header_v6 {
 static int	mrs_allocated = 0;
 
 #define trace(fmt...) do {		\
-	if (opt_v6.tracing)		\
+	if (rds_stress_opts.tracing)		\
 		fprintf(stderr, fmt);	\
 } while (0)
 
@@ -382,7 +320,7 @@ static unsigned long	sys_page_size;
 int pf = PF_RDS;
 int sol = SOL_RDS;
 
-static bool need_sw_fence(struct options_v6 *opts,
+static bool need_sw_fence(struct options *opts,
 			    struct header_v6 *hdr)
 {
 	return (!opts->rdma_use_fence &&
@@ -532,7 +470,7 @@ static void set_rt_priority(void)
  * and the parent dies).
  */
 static void check_parent(pid_t pid, int fd,
-			 bool isv6, struct options_v6 *opts)
+			 bool isv6, struct options *opts)
 {
 	union sockaddr_ip sp;
 	size_t sp_size;
@@ -586,7 +524,7 @@ static void check_parent(pid_t pid, int fd,
  */
 static unsigned char *	msg_pattern;
 
-static void init_msg_pattern(struct options_v6 *opts)
+static void init_msg_pattern(struct options *opts)
 {
 	unsigned int max_size = max(opts->req_size, opts->ack_size);
 	unsigned int i, k = 11;
@@ -674,7 +612,7 @@ static void fill_hdr(void *message, uint32_t bytes, struct header_v6 *hdr_v6,
 		     bool isv6)
 {
 	encode_hdr(message, hdr_v6, isv6);
-	if (opt_v6.verify) {
+	if (rds_stress_opts.verify) {
 		size_t hdr_size;
 
 		hdr_size = isv6 ? HEADER_V6_SIZE : HEADER_SIZE;
@@ -710,7 +648,7 @@ static const char *inet_ntostr(sa_family_t af, const void *val)
  * are in host byte order except for address and port fields.
  */
 static int check_hdr(void *message, uint32_t bytes, struct header_v6 *hdr_v6,
-		     struct options_v6 *opts_v6, bool isv6)
+		     struct options *opts, bool isv6)
 {
 	struct header_v6	msghdr;
 	uint32_t		inc_seq;
@@ -805,7 +743,7 @@ static int check_hdr(void *message, uint32_t bytes, struct header_v6 *hdr_v6,
 		return 1;
 	}
 
-	if (opt_v6.verify
+	if (rds_stress_opts.verify
 	    && memcmp(message + hdr_size, msg_pattern, bytes - hdr_size)) {
 		unsigned char *p = message + hdr_size;
 		unsigned int i, count = 0, total = bytes - hdr_size;
@@ -880,7 +818,7 @@ static sa_family_t get_local_address(int fd, union sockaddr_ip *sp)
 	return sp->addr4.sin_family;
 }
 
-static int rds_socket(struct options_v6 *opts, union sockaddr_ip *sp,
+static int rds_socket(struct options *opts, union sockaddr_ip *sp,
 		      socklen_t addr_len)
 {
 	int bytes;
@@ -978,7 +916,7 @@ static uint64_t get_rdma_key(int fd, uint64_t addr, uint32_t size)
 	mr_args.vec.bytes = size;
 	mr_args.cookie_addr = ptr64(&cookie);
 	mr_args.flags = RDS_RDMA_READWRITE; /* for now, always assume r/w */
-	if (opt_v6.rdma_use_once)
+	if (rds_stress_opts.rdma_use_once)
 		mr_args.flags |= RDS_RDMA_USE_ONCE;
 
 	if (setsockopt(fd, sol, RDS_GET_MR, &mr_args, sizeof(mr_args)))
@@ -1253,7 +1191,7 @@ struct task {
 #define	dst_addr4_addr	dst_addr.addr4.sin_addr.s_addr
 #define	dst_addr4_port	dst_addr.addr4.sin_port
 
-static void alloc_rdma_buffers(struct task *t, struct options_v6 *opts)
+static void alloc_rdma_buffers(struct task *t, struct options *opts)
 {
 	unsigned int i, j;
 	size_t len;
@@ -1291,7 +1229,7 @@ static void rdma_build_req(int fd, struct header_v6 *hdr, struct task *t,
 	rdma_addr = t->rdma_buf[t->send_index];
 
 	rdma_key_p = &t->rdma_req_key[t->send_index];
-	if (opt_v6.rdma_use_get_mr && *rdma_key_p == 0)
+	if (rds_stress_opts.rdma_use_get_mr && *rdma_key_p == 0)
 		*rdma_key_p = get_rdma_key(fd, ptr64(rdma_addr), rdma_size * rdma_vector);
 
 	/* We alternate between RDMA READ and WRITEs */
@@ -1311,14 +1249,14 @@ static void rdma_build_req(int fd, struct header_v6 *hdr, struct task *t,
 	hdr->rdma_vector = rdma_vector;
 
 	if (RDMA_OP_READ == hdr->rdma_op) {
-		if (opt_v6.verify)
+		if (rds_stress_opts.verify)
 			rds_fill_buffer(rdma_addr, rdma_size, hdr->rdma_pattern);
 		trace("Requesting RDMA read for pattern %Lx "
 				"local addr to rdma read %p\n",
 				(unsigned long long) hdr->rdma_pattern,
 				rdma_addr);
 	} else {
-		if (opt_v6.verify)
+		if (rds_stress_opts.verify)
 			rds_fill_buffer(rdma_addr, rdma_size, 0);
 		trace("Requesting RDMA write for pattern %Lx "
 				"local addr to rdma write %p\n",
@@ -1328,7 +1266,7 @@ static void rdma_build_req(int fd, struct header_v6 *hdr, struct task *t,
 }
 
 static void rdma_validate(const struct header_v6 *in_hdr,
-			  struct options_v6 *opts)
+			  struct options *opts)
 {
 	unsigned long	rdma_size;
         unsigned long   rdma_vector;
@@ -1369,11 +1307,11 @@ static void rdma_build_ack(struct header_v6 *hdr,
 static inline uint64_t rdma_user_token(struct task *t, unsigned int qindex,  unsigned int type, uint32_t seq)
 {
 	uint64_t tmp = seq;
-	return (tmp << 32) | ((t->nr * opt_v6.req_depth + qindex) << 2 | type);
+	return (tmp << 32) | ((t->nr * rds_stress_opts.req_depth + qindex) << 2 | type);
 }
 
 static void rdma_mark_completed(struct task *tasks, uint64_t token, int status,
-				struct options_v6 *opts, bool isv6)
+				struct options *opts, bool isv6)
 {
 	struct task *t;
 	unsigned int i;
@@ -1384,8 +1322,8 @@ static void rdma_mark_completed(struct task *tasks, uint64_t token, int status,
 
 	trace("RDS rdma completion for token 0x%lx\n", token);
 
-	t = &tasks[index / opt_v6.req_depth];
-	i = index % opt_v6.req_depth;
+	t = &tasks[index / rds_stress_opts.req_depth];
+	i = index % rds_stress_opts.req_depth;
 
 	if (opts->async) {
 		if (type == OP_REQ)
@@ -1530,7 +1468,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg,
 	case RDMA_OP_WRITE:
 		args.flags = RDS_RDMA_READWRITE;
 
-		if (opt_v6.verify)
+		if (rds_stress_opts.verify)
 			rds_fill_buffer(local_buf, rdma_size,
 					hdr->rdma_pattern);
 		break;
@@ -1546,7 +1484,7 @@ static void rdma_build_cmsg_xfer(struct msghdr *msg,
 	/* If we do not use a fence the immediate send rm can complete */
 	/* before rdma data arrives.. */
 
-	if (!(args.flags & RDS_RDMA_READWRITE) && opt_v6.rdma_use_fence)
+	if (!(args.flags & RDS_RDMA_READWRITE) && rds_stress_opts.rdma_use_fence)
 		args.flags |= RDS_RDMA_FENCE;
 
 	args.flags |= RDS_RDMA_NOTIFY_ME;
@@ -1579,7 +1517,7 @@ static void rdma_build_cmsg_map(struct msghdr *msg, uint64_t addr, uint32_t size
 	args.vec.bytes = size;
 	args.cookie_addr = ptr64(cookie);
 	args.flags = RDS_RDMA_READWRITE; /* for now, always assume r/w */
-	if (opt_v6.rdma_use_once)
+	if (rds_stress_opts.rdma_use_once)
 		args.flags |= RDS_RDMA_USE_ONCE;
 
 	rdma_put_cmsg(msg, RDS_CMSG_RDMA_MAP, &args, sizeof(args));
@@ -1595,7 +1533,7 @@ static void rdma_process_ack(int fd, struct header_v6 *hdr,
 		  (unsigned long long) hdr->rdma_addr);
 
 	/* Need to free the MR unless allocated with use_once */
-	if (!opt_v6.rdma_use_once && !opt_v6.rdma_cache_mrs)
+	if (!rds_stress_opts.rdma_use_once && !rds_stress_opts.rdma_cache_mrs)
 		free_rdma_key(fd, hdr->rdma_key);
 
 	/* if acking an rdma write request - then remote node wrote local host buffer
@@ -1609,7 +1547,7 @@ static void rdma_process_ack(int fd, struct header_v6 *hdr,
 		 */
 		stat_inc(&ctl->cur[S_MBUS_IN_BYTES],  hdr->rdma_size);
 
-		if (opt_v6.verify) {
+		if (rds_stress_opts.verify) {
 			/* This funny looking cast avoids compile warnings
 			 * on 32bit platforms. */
 			rds_compare_buffer((void *)(unsigned long) hdr->rdma_addr,
@@ -1646,7 +1584,7 @@ static void build_header(struct task *t, struct header_v6 *hdr,
 }
 
 static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
-		    unsigned int size, struct options_v6 *opts_v6,
+		    unsigned int size, struct options *opts,
 		    struct child_control *ctl, bool isv6)
 {
 	unsigned char buf[size];
@@ -1691,7 +1629,7 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 			OP_ONLY_RDMA_RD : 0;
 		uint64_t token = rdma_user_token(t, qindex, type, hdr->seq);
 
-		if (need_sw_fence(opts_v6, hdr))
+		if (need_sw_fence(opts, hdr))
 			die("RDMA Rd w/o hw/sw fence!");
 
 		if (t->rdma_inflight[qindex] != 0) {
@@ -1710,7 +1648,7 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 		rdma_build_cmsg_xfer(&msg, hdr, token,
 				t->local_buf[qindex]);
 		rdma_flight_recorder = &t->rdma_inflight[qindex];
-	} else if (opts_v6->async) {
+	} else if (opts->async) {
 		if (hdr->op == OP_REQ)
 			build_cmsg_async_send(&msg,
 			      rdma_user_token(t, hdr->index, OP_REQ,
@@ -1757,7 +1695,7 @@ static int send_msg(int fd, struct task *t, struct header_v6 *hdr,
 
 static int send_packet(int fd, struct task *t,
 		       struct header_v6 *hdr, unsigned int size,
-		       struct options_v6 *opts, struct child_control *ctl,
+		       struct options *opts, struct child_control *ctl,
 		       bool isv6)
 {
 	ssize_t ret;
@@ -1779,7 +1717,7 @@ static int send_packet(int fd, struct task *t,
 
 static int resend_packet(int fd, struct task *t,
 			 struct header_v6 *hdr, unsigned int size,
-			 struct options_v6 *opts, struct child_control *ctl,
+			 struct options *opts, struct child_control *ctl,
 			 bool isv6)
 {
 	ssize_t ret;
@@ -1790,7 +1728,7 @@ static int resend_packet(int fd, struct task *t,
 }
 
 static int send_one(int fd, struct task *t,
-		    struct options_v6 *opts,
+		    struct options *opts,
 		    struct child_control *ctl, bool isv6)
 {
 	struct timeval start;
@@ -1831,7 +1769,7 @@ static int send_one(int fd, struct task *t,
 }
 
 static int send_ack(int fd, struct task *t, unsigned int qindex,
-		    struct options_v6 *opts,
+		    struct options *opts,
 		    struct child_control *ctl,
 		    bool isv6, bool is_rdma_ack)
 {
@@ -1878,7 +1816,7 @@ static int send_ack(int fd, struct task *t, unsigned int qindex,
 }
 
 static int ack_anything(int fd, struct task *t,
-			struct options_v6 *opts,
+			struct options *opts,
 			struct child_control *ctl,
 			int can_send, bool isv6)
 {
@@ -1921,7 +1859,7 @@ eagain:
 }
 
 static int send_anything(int fd, struct task *t,
-			 struct options_v6 *opts,
+			 struct options *opts,
 			 struct child_control *ctl,
 			 int can_send, int do_work, bool isv6)
 {
@@ -1989,7 +1927,7 @@ static int recv_message(int fd,
 			union sockaddr_ip *sp,
 			struct timeval *tstamp,
 			struct task *tasks,
-			struct options_v6 *opts,
+			struct options *opts,
 			bool isv6)
 {
 	struct cmsghdr *cmsg;
@@ -2040,7 +1978,7 @@ static int recv_message(int fd,
 				uint64_t mask;
 
 				memcpy(&mask, CMSG_DATA(cmsg), sizeof(mask));
-				for (i = 0; i < opt_v6.nr_tasks; ++i) {
+				for (i = 0; i < rds_stress_opts.nr_tasks; ++i) {
 					port = ntohs(isv6 ?
 						     tasks[i].dst_addr6_port :
 						     tasks[i].dst_addr4_port);
@@ -2068,7 +2006,7 @@ static int recv_message(int fd,
 }
 
 static int recv_one(int fd, struct task *tasks,
-		    struct options_v6 *opts,
+		    struct options *opts,
 		    struct child_control *ctl,
 		    struct child_control *all_ctl,
 		    bool isv6)
@@ -2238,7 +2176,7 @@ static int recv_one(int fd, struct task *tasks,
 
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct child_control *all_ctl,
-		      struct options_v6 *opts, uint16_t id, int active,
+		      struct options *opts, uint16_t id, int active,
 		      bool isv6)
 {
 	union sockaddr_ip sp;
@@ -2418,7 +2356,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		/* keep the pipeline full */
 		can_send = !!(pfd.revents & POLLOUT);
 		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
-			if (opt_v6.use_cong_monitor && t->congested)
+			if (rds_stress_opts.use_cong_monitor && t->congested)
 				continue;
 			if (t->drain_rdmas)
 				continue;
@@ -2450,7 +2388,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	}
 }
 
-static struct child_control *start_children(struct options_v6 *opts,
+static struct child_control *start_children(struct options *opts,
 					    int active,
 					    bool isv6)
 {
@@ -2783,7 +2721,7 @@ static int reap_one_child(int wflags)
 	die("child pid %u wait status %d\n", pid, status);
 }
 
-static void release_children_and_wait(struct options_v6 *opts,
+static void release_children_and_wait(struct options *opts,
 				      struct child_control *ctl,
 				      struct soak_control *soak_arr,
 				      int active)
@@ -2838,7 +2776,7 @@ static void release_children_and_wait(struct options_v6 *opts,
 	 * You can filter the CSV data from the rds-stress output by
 	 * grepping for the "::" marker.
 	 */
-	if (opt_v6.show_perfdata) {
+	if (rds_stress_opts.show_perfdata) {
 		printf("::");
 		printf("nr_tasks:count"
 		       ",req_size:bytes"
@@ -2889,7 +2827,7 @@ static void release_children_and_wait(struct options_v6 *opts,
 			 */
 			scale = 1e6 / usec_sub(&now, &last_ts);
 
-			if (!opt_v6.show_perfdata) {
+			if (!rds_stress_opts.show_perfdata) {
 				printf("%4u %6"PRIu64" %6"PRIu64" %10.2f %10.2f %10.2f %7.2f %8.2f %5.2f\n",
 					nr_running,
 					disp[S_REQ_TX_BYTES].nr,
@@ -3021,7 +2959,7 @@ static void peer_connect(int fd, const union sockaddr_ip *sp, bool isv6)
 		case ECONNREFUSED:
 		case EHOSTUNREACH:
 		case ENETUNREACH:
-			if (retries >= opt_v6.connect_retries)
+			if (retries >= rds_stress_opts.connect_retries)
 				break;
 			if (retries++ == 0)
 				printf(" - retrying");
@@ -3066,7 +3004,7 @@ static void peer_recv(int fd, void *ptr, size_t size, bool check_version)
 		if (strcmp(peer_version, RDS_VERSION)) {
 			ptr += ret;
 			memcpy(ptr, peer_version, VERSION_MAX_LEN);
-			size = sizeof(struct options_2_0_6) - ret;
+			size = OPTIONS_V1_SIZE - ret;
 		} else
 			size -= ret;
 		ptr += ret;
@@ -3083,8 +3021,8 @@ static void peer_recv(int fd, void *ptr, size_t size, bool check_version)
 	}
 }
 
-static void encode_options(struct options_v6 *dst,
-			   const struct options_v6 *src,
+static void encode_options(struct options *dst,
+			   const struct options *src,
 			   bool isv6)
 {
 	memcpy(dst->version, src->version, VERSION_MAX_LEN);
@@ -3128,8 +3066,8 @@ static void encode_options(struct options_v6 *dst,
 	}
 }
 
-static void decode_options(struct options_v6 *dst,
-			   const struct options_v6 *src,
+static void decode_options(struct options *dst,
+			   const struct options *src,
 			   bool isv6)
 {
 	memcpy(dst->version, src->version, VERSION_MAX_LEN);
@@ -3173,28 +3111,28 @@ static void decode_options(struct options_v6 *dst,
 	}
 }
 
-static void verify_option_encdec(const struct options_v6 *opts_v6, bool isv6)
+static void verify_option_encdec(const struct options *opts, bool isv6)
 {
-	struct options_v6 ebuf, dbuf;
+	struct options ebuf, dbuf;
 	size_t opt_size;
 	unsigned int i;
 
-	opt_size = isv6 ? sizeof(struct options_v6) : sizeof(struct options);
-	(void) memcpy(&dbuf, opts_v6, opt_size);
+	opt_size = isv6 ? OPTIONS_V3_SIZE : OPTIONS_V2_SIZE;
+	(void) memcpy(&dbuf, opts, opt_size);
 	for (i = 0; i < opt_size; ++i) {
 		unsigned char *x = &((unsigned char *) &dbuf)[i];
 
 		*x = ~*x;
 	}
 
-	encode_options(&ebuf, opts_v6, isv6);
+	encode_options(&ebuf, opts, isv6);
 	decode_options(&dbuf, &ebuf, isv6);
 
-	if (memcmp(&dbuf, opts_v6, opt_size))
+	if (memcmp(&dbuf, opts, opt_size))
 		die("encode/decode check of options struct failed\n");
 }
 
-static void reset_conn(struct options_v6 *opts_v6, bool isv6)
+static void reset_conn(struct options *opts, bool isv6)
 {
 	struct rds_reset val;
 	struct rds6_reset val6;
@@ -3204,22 +3142,22 @@ static void reset_conn(struct options_v6 *opts_v6, bool isv6)
 
 	if (isv6) {
 		sp.addr6_family = AF_INET6;
-		sp.addr6_port = htons(opts_v6->starting_port);
-		sp.addr6_addr = opts_v6->receive_addr6;
+		sp.addr6_port = htons(opts->starting_port);
+		sp.addr6_addr = opts->receive_addr6;
 		addr_size = sizeof(sp.addr6);
 
-		val6.tos = opts_v6->tos;
-		val6.src = opts_v6->receive_addr6;
-		val6.dst = opts_v6->send_addr6;
+		val6.tos = opts->tos;
+		val6.src = opts->receive_addr6;
+		val6.dst = opts->send_addr6;
 	} else {
 		sp.addr4_family = AF_INET;
-		sp.addr4_port = htons(opts_v6->starting_port);
-		sp.addr4_addr = htonl(opts_v6->receive_addr);
+		sp.addr4_port = htons(opts->starting_port);
+		sp.addr4_addr = htonl(opts->receive_addr);
 		addr_size = sizeof(sp.addr4);
 
-		val.tos = opts_v6->tos;
-		val.src.s_addr = htonl(opts_v6->receive_addr);
-		val.dst.s_addr = htonl(opts_v6->send_addr);
+		val.tos = opts->tos;
+		val.src.s_addr = htonl(opts->receive_addr);
+		val.dst.s_addr = htonl(opts->send_addr);
 	}
 	fd = bound_socket(pf, SOCK_SEQPACKET, 0, &sp, addr_size);
 
@@ -3232,15 +3170,15 @@ static void reset_conn(struct options_v6 *opts_v6, bool isv6)
 	}
 }
 
-/* If isv6 is false, the parameter opts_v6's receive_addr6 and send_addr6 are
- * invalid.  If isv6 is true, the parameter opts_v6's receive_addr and
+/* If isv6 is false, the parameter opts's receive_addr6 and send_addr6 are
+ * invalid.  If isv6 is true, the parameter opts's receive_addr and
  * send_addr are invalid.
  */
-static int active_parent(struct options_v6 *opts,
+static int active_parent(struct options *opts,
 			 struct soak_control *soak_arr,
 			 bool isv6)
 {
-	struct options_v6 enc_options;
+	struct options enc_options;
 	struct child_control *ctl;
 	union sockaddr_ip sp;
 	int fd;
@@ -3337,11 +3275,11 @@ static int active_parent(struct options_v6 *opts,
 	encode_options(&enc_options, opts, isv6);
 	/* Use the new options_v6 to send to IPv6 peer. */
 	if (isv6 || opts->tos || opts->async)
-		peer_send(fd, &enc_options, isv6 ? sizeof(struct options_v6) :
-			  sizeof(struct options));
+		peer_send(fd, &enc_options, isv6 ? OPTIONS_V3_SIZE :
+			  OPTIONS_V2_SIZE);
 	else
 		peer_send(fd, &enc_options.req_depth,
-			  sizeof(struct options_2_0_6));
+			  OPTIONS_V1_SIZE);
 
 	printf("negotiated options, tasks will start in 2 seconds\n");
 	ctl = start_children(opts, 1, isv6);
@@ -3361,7 +3299,7 @@ static int active_parent(struct options_v6 *opts,
 static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 			  struct soak_control *soak_arr, bool isv6)
 {
-	struct options_v6 remote_v6, *opts;
+	struct options remote_v6, *opts;
 	struct child_control *ctl;
 	union sockaddr_ip sp;
 	socklen_t socklen;
@@ -3453,7 +3391,7 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 	 */
 	if (isv6) {
 		/* For IPv6 peer, send struct options_v6 */
-		peer_recv(fd, &remote_v6, sizeof(remote_v6), true);
+		peer_recv(fd, &remote_v6, OPTIONS_V3_SIZE, true);
 		decode_options(&remote_v6, &remote_v6, isv6);
 		opts = &remote_v6;
 		opts->send_addr6 = opts->receive_addr6;
@@ -3461,14 +3399,14 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 		opts->addr_scope_id = addr->addr6.sin6_scope_id;
 	} else {
 		/* For IPv4 peer, send struct options */
-		peer_recv(fd, &remote_v6, sizeof(struct options), true);
+		peer_recv(fd, &remote_v6, OPTIONS_V2_SIZE, true);
 		decode_options(&remote_v6, &remote_v6, isv6);
 		opts = &remote_v6;
 		opts->send_addr = opts->receive_addr;
 		opts->receive_addr = ntohl(addr->addr4_addr);
 	}
 
-	opt_v6 = *opts;
+	rds_stress_opts = *opts;
 
 	ctl = start_children(opts, 0, isv6);
 
@@ -3635,14 +3573,13 @@ static struct option long_options[] = {
 
 int main(int argc, char **argv)
 {
-	struct options_v6 opts;
+	struct options opts;
 	struct soak_control *soak_arr = NULL;
 	union sockaddr_ip recv_addr, send_addr;
 	bool set_send_addr;
 	bool set_recv_addr;
 	bool isv6_prev;
 	bool isv6;
-
 
 #ifdef DYNAMIC_PF_RDS
 	pf = discover_pf_rds();
@@ -3662,7 +3599,7 @@ int main(int argc, char **argv)
 	set_send_addr = false;
 	set_recv_addr = false;
 
-	(void)memset(&opts, 0xff, sizeof(opts));
+	(void)memset(&opts, 0xff, OPTIONS_V3_SIZE);
 
 	/* Use IPv4 by default if the user does not specify an address.*/
 	isv6 = false;
@@ -3913,7 +3850,7 @@ int main(int argc, char **argv)
 	if (opts.rdma_size && 0)
 		opts.rdma_size = (opts.rdma_size + 4095) & ~4095;
 
-	opt_v6 = opts;
+	rds_stress_opts = opts;
 
 	return active_parent(&opts, soak_arr, isv6);
 }

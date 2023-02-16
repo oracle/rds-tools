@@ -3335,7 +3335,7 @@ static void reset_conn(struct options *opts, bool isv6)
 
 	if (isv6) {
 		sp.addr6_family = AF_INET6;
-		sp.addr6_port = htons(opts->starting_port);
+		sp.addr6_port = 0;
 		sp.addr6_addr = opts->receive_addr6;
 		addr_size = sizeof(sp.addr6);
 
@@ -3344,7 +3344,7 @@ static void reset_conn(struct options *opts, bool isv6)
 		val6.dst = opts->send_addr6;
 	} else {
 		sp.addr4_family = AF_INET;
-		sp.addr4_port = htons(opts->starting_port);
+		sp.addr4_port = 0;
 		sp.addr4_addr = htonl(opts->receive_addr);
 		addr_size = sizeof(sp.addr4);
 

@@ -90,6 +90,7 @@ struct options {
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
+	uint8_t	inq_enabled;
 	/* When adding new options they also need to be added to rs_options struct */
 } __attribute__((packed));
 
@@ -156,6 +157,7 @@ static struct rs_option rs_options[] = {
 	{ "send_addr6", RS_OPTION_V6ADDR, offsetof(struct options, send_addr6) },
 	{ "receive_addr6", RS_OPTION_V6ADDR, offsetof(struct options, receive_addr6) },
 	{ "addr_scope_id ", RS_OPTION_UINT32, offsetof(struct options, addr_scope_id) },
+	{ "inq_enabled", RS_OPTION_UINT8, offsetof(struct options, inq_enabled) },
 	{ NULL, 0, 0 }
 };
 
@@ -504,6 +506,7 @@ static void usage(void)
 	" --async                       enable async sends\n"
 	" --cancel-sent-to              child processes issue RDS_CANCEL_SENT_TO. Use Ctrl-C\n"
 	" --abort-after [seconds]       parent process terminates after [seconds] in the midst of operation\n"
+	" -i, --rds-inq		       requests RDS-INQ control message response from recvmsg syscall\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"
@@ -1989,6 +1992,7 @@ static int recv_message(int fd,
 			struct timeval *tstamp,
 			struct task *tasks,
 			struct options *opts,
+			int *more_data_inq,
 			bool isv6)
 {
 	struct cmsghdr *cmsg;
@@ -1998,6 +2002,12 @@ static int recv_message(int fd,
 	ssize_t ret;
 	size_t addr_size;
 	size_t hdr_size;
+
+	/* When RDS_INQ option is not provided in the command,
+	 * then assign -1 to *more_data_inq. Thus, run_child()
+	 * treats it as a boolean TRUE.
+	 */
+	*more_data_inq = -1;
 
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_name = (struct sockaddr *)sp;
@@ -2061,6 +2071,9 @@ static int recv_message(int fd,
 			rdma_mark_completed(tasks, notify.user_token,
 					    notify.status, opts, isv6);
 			break;
+		case RDS_CMSG_INQ:
+			*more_data_inq = *((int *) CMSG_DATA(cmsg));
+			break;
 		}
 	}
 	return ret;
@@ -2070,7 +2083,7 @@ static int recv_one(int fd, struct task *tasks,
 		    struct options *opts,
 		    struct child_control *ctl,
 		    struct child_control *all_ctl,
-		    bool isv6)
+		    int *more_data_inq, bool isv6)
 {
 	char buf[max(opts->req_size, opts->ack_size)];
 	rds_rdma_cookie_t rdma_dest = 0;
@@ -2085,7 +2098,7 @@ static int recv_one(int fd, struct task *tasks,
 
 
 	ret = recv_message(fd, buf, sizeof(buf), &rdma_dest, &sp, &tstamp,
-			   tasks, opts, isv6);
+			   tasks, opts, more_data_inq, isv6);
 	if (ret < 0)
 		return ret;
 
@@ -2242,7 +2255,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 {
 	union sockaddr_ip sp;
 	struct pollfd pfd;
-	int fd;
+	int fd, inq;
 	uint16_t i;
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
@@ -2372,6 +2385,11 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 	fd = rds_socket(opts, &sp, addr_size);
 
+	inq = opts->inq_enabled;
+	if (inq && setsockopt(fd, SOL_RDS, SO_RDS_INQ, &inq, sizeof(inq)))
+		fprintf(stderr, "Setting RDS_INQ flag failed errno = %d \n",
+			errno);
+
 	ctl->ready = 1;
 
 	while (ctl->start.tv_sec == 0) {
@@ -2391,7 +2409,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
-		int can_send;
+		int can_send, more_data_inq;
 
 		check_parent(parent_pid, fd, isv6, opts);
 
@@ -2406,7 +2424,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 
 		if (pfd.revents & POLLIN) {
 			while (recv_one(fd, tasks, opts, ctl, all_ctl,
-					isv6) >= 0)
+					&more_data_inq, isv6) >= 0 &&
+			       more_data_inq)
 				;
 		}
 
@@ -3257,6 +3276,7 @@ static void encode_options(struct options *dst,
 	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
 		       sizeof(dst->receive_addr6));
 	dst->addr_scope_id = htonl(src->addr_scope_id);
+	dst->inq_enabled = src->inq_enabled;
 }
 
 static void decode_options(struct options *dst,
@@ -3300,6 +3320,7 @@ static void decode_options(struct options *dst,
 	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
 		       sizeof(dst->receive_addr6));
 	dst->addr_scope_id = ntohl(src->addr_scope_id);
+	dst->inq_enabled = src->inq_enabled;
 
 }
 
@@ -3556,7 +3577,8 @@ static int active_parent(struct options *opts,
 }
 
 static int passive_parent(union sockaddr_ip *addr, uint16_t port,
-			  struct soak_control *soak_arr, bool isv6)
+			  uint8_t inq_enabled, struct soak_control *soak_arr,
+			  bool isv6)
 {
 	struct options remote_v6, *opts;
 	struct child_control *ctl = NULL;
@@ -3668,6 +3690,7 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 		opts->receive_addr = ntohl(addr->addr4_addr);
 	}
 
+	opts->inq_enabled = inq_enabled;
 	rds_stress_opts = *opts;
 
 	/* Wait for "GO" from the initiating peer */
@@ -3848,6 +3871,7 @@ static struct option long_options[] = {
 { "verify",		no_argument,		NULL,	'v'	},
 { "trace",		no_argument,		NULL,	'V'	},
 { "one-way",		no_argument,		NULL,	'o'	},
+{ "rds-inq",		no_argument, 		NULL,	'i'	},
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
@@ -3932,6 +3956,7 @@ int main(int argc, char **argv)
 	opts.rdma_vector = 1;
 	opts.tos = 0;
 	opts.async = 0;
+	opts.inq_enabled = 0;
 	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 
@@ -3948,7 +3973,7 @@ int main(int argc, char **argv)
 	while(1) {
 		int c, index;
 
-		c = getopt_long(argc, argv, "+a:cD:d:hI:M:op:q:Rr:s:t:T:Q:vVz",
+		c = getopt_long(argc, argv, "+a:cD:d:hiI:M:op:q:Rr:s:t:T:Q:vVz",
 				long_options, &index);
 		if (c == -1)
 			break;
@@ -3967,6 +3992,9 @@ int main(int argc, char **argv)
 			case 'd':
 				opts.req_depth = parse_ull(optarg,
 							   (uint32_t)~0);
+				break;
+			case 'i':
+				opts.inq_enabled = 1;
 				break;
                         case 'I':
 				opts.rdma_vector = parse_ull(optarg, 512);
@@ -4119,7 +4147,7 @@ int main(int argc, char **argv)
 	/* the passive parent will read options off the wire */
 	if (!set_send_addr)
 		return passive_parent(&recv_addr, opts.starting_port,
-				      soak_arr, isv6);
+				      opts.inq_enabled, soak_arr, isv6);
 
 	/* If user does not specify an ack size, use the minimum size. */
 	if (opts.ack_size == 0) {

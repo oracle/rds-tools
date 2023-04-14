@@ -52,7 +52,7 @@ enum {
         M_RDMA_READ_ONLY,
         M_RDMA_WRITE_ONLY
 };
-#define VERSION_MAX_LEN 16 
+#define VERSION_MAX_LEN 16
 #define VERSION_FLAG_PAD 2
 #define JSON_IDENTIFIER 97
 
@@ -924,7 +924,7 @@ static int rds_socket(struct options *opts, union sockaddr_ip *sp,
 
 	fcntl(fd, F_SETFL, O_NONBLOCK);
 
-	if (opts->tos && ioctl(fd, SIOCRDSSETTOS, &opts->tos)) 
+	if (opts->tos && ioctl(fd, SIOCRDSSETTOS, &opts->tos))
 		die_errno("ERROR: failed to set TOS\n");
 
 	return fd;
@@ -2173,7 +2173,7 @@ static int recv_one(int fd, struct task *tasks,
 	}
 
 	if (hdr.op == OP_ACK) {
-                uint64_t rtt_time = 
+                uint64_t rtt_time =
                   usec_sub(&tstamp, &t->send_time[expect_index]);
 
 		stat_inc(&ctl->cur[S_RTT_USECS], rtt_time);
@@ -2902,7 +2902,7 @@ static void release_children_and_wait(struct options *opts,
 	uint16_t nr_running;
         uint64_t latency_histogram[MAX_BUCKETS];
 
-	if (show_histogram) 
+	if (show_histogram)
         	memset(latency_histogram, 0, sizeof(latency_histogram));
 
 	gettimeofday(&start, NULL);
@@ -3083,16 +3083,16 @@ static void release_children_and_wait(struct options *opts,
 			avg(&summary[S_RTT_USECS]),
 			soak_arr? scale * cpu_total : -1.0);
 
-		if (show_histogram) 
+		if (show_histogram)
 		{
 			for (i = 0; i < opts->nr_tasks; i++)
 			  for (j=0;j < MAX_BUCKETS; j++)
 			    latency_histogram[j] += ctl[i].latency_histogram[j];
-			    
+
 			printf("\nRTT histogram\n");
 			printf("RTT (us)        \t\t    Count\n");
 			for (i=0;i < MAX_BUCKETS; i++)
-			  printf("[%6u - %6u] \t\t %8u\n", 1 << i, 1 << (i+1), 
+			  printf("[%6u - %6u] \t\t %8u\n", 1 << i, 1 << (i+1),
 			         (unsigned int)latency_histogram[i]);
 		}
 	}

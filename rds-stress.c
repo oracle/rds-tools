@@ -3935,7 +3935,7 @@ int main(int argc, char **argv)
 	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 
-	rtt_threshold = ~0U;
+	rtt_threshold = ~0UL;
 	show_histogram = 0;
 	reset_connection = 0;
 	cancel_sent_to = 0;
@@ -4045,7 +4045,7 @@ int main(int argc, char **argv)
 				opts.tracing = 1;
 				break;
                         case OPT_SHOW_OUTLIERS:
-                                rtt_threshold = parse_ull(optarg, ~0U);
+			  rtt_threshold = parse_ull(optarg, (uint64_t)~0UL);
                                 break;
                         case OPT_SHOW_HISTOGRAM:
                                 show_histogram = 1;

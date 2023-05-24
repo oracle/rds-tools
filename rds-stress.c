@@ -3409,10 +3409,9 @@ static char *create_json_string(const struct options *opts)
 
 	jobj = json_object_new_object();
 	json_options_ptr = create_json_options(opts, jobj);
-	json_options = (char *)calloc((strlen(json_options_ptr) + 1), sizeof(char));
+	json_options = strdup(json_options_ptr);
 	if (!json_options)
 		die_errno("Unable to allocate buffer for json options");
-	strncpy(json_options, json_options_ptr, strlen(json_options_ptr));
 	json_object_put(jobj);
 
 	return json_options;

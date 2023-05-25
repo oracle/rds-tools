@@ -180,12 +180,13 @@ static int get_comm(pid_t pid, char *comm, int sz)
  * Thus we use this function to swap the 0 and -1 values to indicate
  * a non congested state and a non-supported state.
  */
-static void get_congested(int *congested)
+static int get_congested(int congested)
 {
-	if (*congested == 0)
-		*congested = -1;
-	else if (*congested == -1)
-		*congested = 0;
+	if (congested == 0)
+		return -1;
+	else if (congested == -1)
+		return 0;
+        return congested;
 }
 
 static void print_sockets(void *data, int each, socklen_t len, void *extra,
@@ -214,7 +215,7 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			       ntohs(sk6.connected_port),
 			       sk6.sndbuf, sk6.rcvbuf,
 			       (unsigned long long)sk6.inum);
-			get_congested(&sk6.cong);
+			sk6.cong = get_congested(sk6.cong);
 				printf(" %8d", sk6.cong);
 			if (get_comm(sk6.pid, comm, TASK_COMM_LEN) != -1)
 				printf(" %10u %16s", sk6.pid, comm);
@@ -229,7 +230,7 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 			       ntohs(sk.connected_port),
 			       sk.sndbuf, sk.rcvbuf,
 			       (unsigned long long)sk.inum);
-			get_congested(&sk.cong);
+			sk.cong = get_congested(sk.cong);
 				printf(" %8d", sk.cong);
 			if (get_comm(sk.pid, comm, TASK_COMM_LEN) != -1)
 				printf(" %10u %16s", sk.pid, comm);
@@ -238,14 +239,14 @@ static void print_sockets(void *data, int each, socklen_t len, void *extra,
 	}
 }
 
-static void print_time(time_t *time)
+static void print_time(time_t time)
 {
 	char buf[128];
 
-	if ((*time) == 0) {
+	if (time == 0) {
 		printf("%-24s ", "---");
 	} else {
-		strftime(buf, sizeof(buf), "%D %H:%M:%S %Z", localtime(time));
+		strftime(buf, sizeof(buf), "%D %H:%M:%S %Z", localtime(&time));
 		printf("%-24s ", buf);
 	}
 }
@@ -327,9 +328,9 @@ static void print_paths(void *data, int each, socklen_t len, void *extra,
 		pinfo = (struct rds_path_info *) (rds_cinfo + 1);
 		do {
 			printf("%-4d ", pinfo->index);
-			print_time(&pinfo->connect_time);
-			print_time(&pinfo->attempt_time);
-			print_time(&pinfo->reset_time);
+			print_time(pinfo->connect_time);
+			print_time(pinfo->attempt_time);
+			print_time(pinfo->reset_time);
 			printf("%-10d ", pinfo->connect_attempts);
 			printf("%c%c%c%c   ",
 			rds_conn_flag(pinfo->flags, SENDING,

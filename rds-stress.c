@@ -707,6 +707,10 @@ static const char *inet_ntostr(sa_family_t af, const void *val)
 }
 #undef	NTOS_NUM_BUF
 
+static int in6_are_addr_equal(struct in6_addr addr1, struct in6_addr addr2)
+{
+	return IN6_ARE_ADDR_EQUAL(&addr1, &addr2);
+}
 /*
  * Compare incoming message header with expected header. All header fields
  * are in host byte order except for address and port fields.
@@ -739,8 +743,8 @@ static int check_hdr(void *message, uint32_t bytes, struct header_v6 *hdr_v6,
 						    &msghdr.from_addr_v6);
 			hdr_from_addr = inet_ntostr(AF_INET6,
 						    &hdr_v6->from_addr_v6);
-			if (IN6_ARE_ADDR_EQUAL(&msghdr.from_addr_v6,
-					       &hdr_v6->from_addr_v6))
+			if (in6_are_addr_equal(msghdr.from_addr_v6,
+					       hdr_v6->from_addr_v6))
 				from_op = " =";
 			else
 				from_op = "!=";
@@ -748,8 +752,8 @@ static int check_hdr(void *message, uint32_t bytes, struct header_v6 *hdr_v6,
 						  &msghdr.to_addr_v6);
 			hdr_to_addr = inet_ntostr(AF_INET6,
 						  &hdr_v6->to_addr_v6);
-			if (IN6_ARE_ADDR_EQUAL(&msghdr.to_addr_v6,
-					       &hdr_v6->to_addr_v6))
+			if (in6_are_addr_equal(msghdr.to_addr_v6,
+					       hdr_v6->to_addr_v6))
 				to_op = " =";
 			else
 				to_op = "!=";
@@ -3430,6 +3434,7 @@ static int active_parent(struct options *opts,
 	char *remote_json_options;
 	struct child_control *ctl;
 	union sockaddr_ip sp;
+	struct in6_addr receive_addr6;
 	int fd;
 	uint8_t ok;
 
@@ -3506,7 +3511,8 @@ static int active_parent(struct options *opts,
 
 	peer_connect(fd, &sp, isv6);
 
-	if ((isv6 && IN6_IS_ADDR_UNSPECIFIED(&opts->receive_addr6)) ||
+	receive_addr6 = opts->receive_addr6;
+	if ((isv6 && IN6_IS_ADDR_UNSPECIFIED(&receive_addr6)) ||
 	    (!isv6 && opts->receive_addr == INADDR_ANY)) {
 		if (get_local_address(fd, &sp) == AF_INET) {
 			opts->receive_addr = ntohl(sp.addr4_addr);

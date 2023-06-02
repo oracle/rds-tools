@@ -3108,15 +3108,21 @@ static void release_children_and_wait(struct options *opts,
 
 		if (show_histogram)
 		{
+			double total = 0.0;
 			for (i = 0; i < opts->nr_tasks; i++)
 			  for (j=0;j < MAX_BUCKETS; j++)
 			    latency_histogram[j] += ctl[i].latency_histogram[j];
 
+			for (i=0;i < MAX_BUCKETS; i++)
+				total += latency_histogram[i];
+
 			printf("\nRTT histogram\n");
 			printf("RTT (us)        \t\t    Count\n");
 			for (i=0;i < MAX_BUCKETS; i++)
-			  printf("[%6u - %6u] \t\t %8u\n", 1 << i, 1 << (i+1),
-			         (unsigned int)latency_histogram[i]);
+			  printf("[%6u - %6u] \t\t %8u \t\t (%.2f%%)\n", 1 << i,
+				 1 << (i+1), (unsigned int)latency_histogram[i],
+				 total ? latency_histogram[i] / total * 100.00 :
+				 0.0);
 		}
 	}
 }

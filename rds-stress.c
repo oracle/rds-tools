@@ -90,7 +90,7 @@ struct options {
         struct in6_addr send_addr6;
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
-	uint8_t	inq_enabled;
+	uint8_t		inq_enabled;
 	/* When adding new options they also need to be added to rs_options struct */
 } __attribute__((packed));
 
@@ -157,7 +157,7 @@ static struct rs_option rs_options[] = {
 	{ "send_addr6", RS_OPTION_V6ADDR, offsetof(struct options, send_addr6) },
 	{ "receive_addr6", RS_OPTION_V6ADDR, offsetof(struct options, receive_addr6) },
 	{ "addr_scope_id ", RS_OPTION_UINT32, offsetof(struct options, addr_scope_id) },
-	{ "inq_enabled", RS_OPTION_UINT8, offsetof(struct options, inq_enabled) },
+	{ "disable_inq", RS_OPTION_UINT8, offsetof(struct options, inq_enabled) },
 	{ NULL, 0, 0 }
 };
 
@@ -493,6 +493,8 @@ static void usage(void)
 	" --rdma-alignment [alignment]     request a buffer alignment to test unaligned RDMA (default is 0)\n"
 	" --rdma-key-o-meter               used to track whether RDS zerocopy code issues repeating R_Keys\n"
         "                                  disabled by default)\n"
+	" --disable-inq			   disables RDS-INQ control message response from recvmsg syscall\n"
+	"				   (default is enabled)\n"
 	"\n"
 	"Optional flags:\n"
 	" -c, --report-cpu              measure cpu use with per-cpu soak processes\n"
@@ -506,7 +508,6 @@ static void usage(void)
 	" --async                       enable async sends\n"
 	" --cancel-sent-to              child processes issue RDS_CANCEL_SENT_TO. Use Ctrl-C\n"
 	" --abort-after [seconds]       parent process terminates after [seconds] in the midst of operation\n"
-	" -i, --rds-inq		       requests RDS-INQ control message response from recvmsg syscall\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"
@@ -3861,6 +3862,7 @@ enum {
 	OPT_ASYNC,
 	OPT_CANCEL_SENT_TO,
 	OPT_ABORT_AFTER,
+	OPT_DISABLE_RDS_INQ,
 };
 
 static struct option long_options[] = {
@@ -3882,7 +3884,6 @@ static struct option long_options[] = {
 { "verify",		no_argument,		NULL,	'v'	},
 { "trace",		no_argument,		NULL,	'V'	},
 { "one-way",		no_argument,		NULL,	'o'	},
-{ "rds-inq",		no_argument, 		NULL,	'i'	},
 
 { "rdma-use-once",	required_argument,	NULL,	OPT_RDMA_USE_ONCE },
 { "rdma-use-get-mr",	required_argument,	NULL,	OPT_RDMA_USE_GET_MR },
@@ -3901,6 +3902,7 @@ static struct option long_options[] = {
 { "async",              no_argument,            NULL,   OPT_ASYNC },
 { "cancel-sent-to",     no_argument,            NULL,   OPT_CANCEL_SENT_TO },
 { "abort-after",        required_argument,      NULL,   OPT_ABORT_AFTER },
+{ "disable-inq",	no_argument,		NULL,	OPT_DISABLE_RDS_INQ },
 { NULL }
 };
 
@@ -3967,7 +3969,7 @@ int main(int argc, char **argv)
 	opts.rdma_vector = 1;
 	opts.tos = 0;
 	opts.async = 0;
-	opts.inq_enabled = 0;
+	opts.inq_enabled = 1;
 	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 
@@ -3984,7 +3986,7 @@ int main(int argc, char **argv)
 	while(1) {
 		int c, index;
 
-		c = getopt_long(argc, argv, "+a:cD:d:hiI:M:op:q:Rr:s:t:T:Q:vVz",
+		c = getopt_long(argc, argv, "+a:cD:d:hI:M:op:q:Rr:s:t:T:Q:vVz",
 				long_options, &index);
 		if (c == -1)
 			break;
@@ -4003,9 +4005,6 @@ int main(int argc, char **argv)
 			case 'd':
 				opts.req_depth = parse_ull(optarg,
 							   (uint32_t)~0);
-				break;
-			case 'i':
-				opts.inq_enabled = 1;
 				break;
                         case 'I':
 				opts.rdma_vector = parse_ull(optarg, 512);
@@ -4133,6 +4132,9 @@ int main(int argc, char **argv)
 				break;
 			case OPT_PERFDATA:
 				opts.show_perfdata = 1;
+				break;
+			case OPT_DISABLE_RDS_INQ:
+				opts.inq_enabled = 0;
 				break;
 			case 'h':
 			case '?':

@@ -2077,7 +2077,7 @@ static int recv_message(int fd,
 					    notify.status, opts, isv6);
 			break;
 		case RDS_CMSG_INQ:
-			*more_data_inq = *((int *) CMSG_DATA(cmsg));
+			*more_data_inq = *CMSG_DATA(cmsg);
 			break;
 		}
 	}

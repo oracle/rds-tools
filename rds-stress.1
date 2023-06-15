@@ -93,11 +93,11 @@ to terminate in the midst of operation.
 This is useful in combination with the "--cancel-sent-to"
 option in order to measure the amount of time spent
 in "RDS_CANCEL_SENT_TO" while send operations are ongoing.
-.It Fl i, -rds-inq
-If used, each task will set RDS-INQ socket option to receive the number
+.It Fl -disable-inq
+If used, each task will not set RDS-INQ socket option to receive the number
 of backlog bytes pending to be read from the receive queue. Since application
-is now aware of pending bytes in the receive queue, the number of recvmsg()
-syscalls can be optimized.
+is now not aware of pending bytes in the receive queue, the number of recvmsg()
+syscalls can be higher leading to higher system load and lower cpu yield.
 .El
 .Ss Active Sender Configuration Options
 The following options are available for use on the active sender command line,

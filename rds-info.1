@@ -78,7 +78,7 @@ be displayed and will be left blank otherwise.
 
 .It Fl n
 Display all RDS connections.  RDS connections are maintained between
-nodes by transports.  
+nodes by transports.
 
 .Bl -tag -width 4
 .It LocalAddr
@@ -86,7 +86,7 @@ The IP address of this node.  For connections that originate and terminate on
 the same node the local address indicates which address initiated the
 connection establishment.
 .It RemoteAddr
-The IP address of the remote end of the connection.  
+The IP address of the remote end of the connection.
 .It NextTX
 The sequence number that will be given to the next message that is sent
 over the connection.
@@ -95,7 +95,7 @@ The sequence number that is expected from the next message to arrive over
 the connection.  Any incoming messages with sequence numbers less than this
 will be dropped.
 .It Flg
-Flags which indicate the state of the connection. 
+Flags which indicate the state of the connection.
 .Bl -tag -width 4
 .It s
 A process is currently sending a message down the connection.
@@ -105,6 +105,76 @@ The transport is attempting to connect to the remote address.
 The connection to the remote host is connected and active.
 .El
 .El
+
+.It Fl N
+Display the RDS information, as specified by any other command-line options,
+for all network namespaces.  Information for the "home" namespace (the network
+namespace in which
+.Nm
+is executed) is printed first, followed by information for any other network
+namespaces in the order of their namespace identifiers.  A header containing a
+given namespace's identifier is printed before the information for that
+namespace.  If the underlying kernel RDS implementation does not support
+network namespaces, the global RDS information will appear for every network
+namespace.
+
+In general, namespaces do not have human-oriented names; the kernel uses
+opaque numeric values as namespace identifiers.
+.Sy ip-netns(8)
+can create and operate on named network namespaces, but these names are for
+user convenience only, and are not available to the kernel or to
+ip-netns-unaware software.  Container frameworks that isolate containers by
+using network (and other) namespaces typically create these namespaces
+directly and do not use or export names for them.
+
+Thus, in the absence of a more user-friendly alternative,
+.Nm
+uses the numeric kernel namespace identifiers to identify namespaces in its
+output.
+
+Users can obtain the identifier of the network namespace for a process as
+follows:
+
+.Bd -literal -offset indent
+# echo $$
+77712
+# ls -l /proc/77712/ns/net
+lrwxrwxrwx 1 root root 0 Jul 18 11:21 /proc/77712/ns/net -> 'net:[4026531840]'
+.Ed
+
+In this example, the value 4026531840 is the identifier for the network
+namespace of the current shell process.
+
+To locate the RDS information for a particular container in
+.Nm
+output:
+
+.Bl -enum -offset indent
+.It
+Identify a process in the container, for example by using the
+container management software's
+.Sy ps
+or
+.Sy inspect
+command.
+.It
+Find the network namespace identifier for the container process from the /proc
+entry for the process, as indicated above.
+.It
+Look for the
+.Nm
+output section for the network namespace of the container's process.
+.El
+
+Accessing other namespaces requires that the
+.Nm
+process has the
+.Sy CAP_SYS_ADMIN
+and
+.Sy CAP_SYS_PTRACE
+capabilities, and that the
+.Sy libdhash
+package is installed on the system.
 
 .It Fl r, Fl s, Fl t
 Display the messages in the receive, send, or retransmit queues respectively.
@@ -123,7 +193,7 @@ The number of bytes in the message payload.
 .El
 
 The following information sources are dependent on specific transports which
-may not always be available. 
+may not always be available.
 
 .It Fl I
 Display the IB connections which the IB transport is using to provide

@@ -17,6 +17,16 @@ BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 ExcludeArch:	s390 s390x
 BuildRequires:	json-c-devel
 
+#
+# Packages required to build and run rds-info(1) with network namespace
+# support
+#
+# The install-time requirement on libcap(3) should always be satisfied, since
+# systemd(1) (among other things) also requires that library.
+#
+BuildRequires:	libcap-devel libdhash-devel
+Requires:	libcap
+
 %description
 Various tools for support of the RDS (Reliable Datagram Socket) API.  RDS
 is specific to InfiniBand and iWARP networks and does not work on non-RDMA

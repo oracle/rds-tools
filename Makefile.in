@@ -9,6 +9,8 @@ all: all-programs
 CFLAGS = -O2 -Wall -Iinclude -g
 CPPFLAGS = -DDEBUG_EXE -DRDS_VERSION=\"@VERSION@\" -MD -MP -MF $(@D)/.$(basename $(@F)).d
 
+rds-info : LDLIBS += -lcap -ldl
+
 HEADERS = kernel-list.h pfhack.h include/rds.h
 COMMON_SOURCES = pfhack.c
 SOURCES = $(addsuffix .c,$(PROGRAMS)) $(COMMON_SOURCES)
@@ -46,7 +48,7 @@ distclean: clean
 
 
 rds-info rds-ping : % : %.o $(COMMON_OBJECTS)
-	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^
+	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 rds-stress : % : %.o $(COMMON_OBJECTS)
 	gcc $(CFLAGS) $(LDFLAGS) -o $@ $^ -ljson-c
@@ -101,4 +103,3 @@ rpm: $(TAR_FILE)
 
 .PHONY: dist
 dist: $(TAR_FILE)
-

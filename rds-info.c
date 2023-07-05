@@ -41,8 +41,17 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/capability.h>
+#include <sys/param.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <ctype.h>
+#include <dhash.h>
+#include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sched.h>
 #include <string.h>
 #include <inttypes.h>
 #include <netinet/in.h>
@@ -89,6 +98,27 @@ static int	opt_add;
 char		add_fields[ADD_FIELD_STR_LEN] = "";
 
 char *progname = "rds-info";
+
+/*
+ * Definitions to support getting RDS information in other namespaces
+ *
+ * Required functions from "libdhash" are resolved at runtime
+ */
+#define LIBDHASH "libdhash.so.1"
+#define NETNSTBLSIZE 8192
+#define PROCDIR "/proc"
+#define HOMENETNSPATH PROCDIR"/self/ns/net"
+
+static uint64_t	home_netns;	/* this process' starting network namespace */
+static void *libdhash = NULL;	/* handle for dlopen()'ed libdhash */
+/* Declare "symbolf" as a pointer to the type of "symbol" */
+#define DECLARE_DLSYM(symbol)	static typeof(symbol) *symbol##f
+DECLARE_DLSYM(hash_create);
+DECLARE_DLSYM(hash_destroy);
+DECLARE_DLSYM(hash_enter);
+DECLARE_DLSYM(hash_entries);
+DECLARE_DLSYM(hash_error_string);
+DECLARE_DLSYM(hash_has_key);
 
 /* IPv4/v6 address output string width */
 #define PRT_IPV4_WIDTH	15
@@ -455,7 +485,7 @@ static void print_msgs(void *data, int each, socklen_t len, void *extra,
 
 static void print_tcp_socks(void *data, int each, socklen_t len, void *extra,
 			    bool prt_ipv6)
-{		
+{
 	struct rds6_info_tcp_socket ts6;
 	struct rds_info_tcp_socket ts;
 	int prt_width;
@@ -717,65 +747,14 @@ static void print_usage(int rc)
 	exit(rc);
 }
 
-int main(int argc, char **argv)
+static int rds_info(int given_options, bool v4andv6, int pf, int sol)
 {
-	char optstring[258] = "ao:v+";
-	int given_options = 0;
-	socklen_t len = 0;
-	void *data = NULL;
-	int fd;
 	int each;
-	int c;
-	char *last;
+	int fd;
 	int i;
-	int pf;
-	int sol;
-	bool v4andv6;
+	void *data = NULL;
+	socklen_t len = 0;
 
-	/* Default is to print out IPv4 RDS connection info only. */
-	v4andv6 = false;
-
-	/* quickly append all our info options to the optstring */
-	last = &optstring[strlen(optstring)];
-	for (i = 0; i < array_size(infos); i++) {
-		if (!infos[i].opt_val_v6)
-			continue;
-		*last = (char)i;
-		last++;
-		*last = '\0';
-	}
-
-	while ((c = getopt(argc, argv, optstring)) != EOF) {
-		switch (c) {
-		case 'o':
-			strncpy(add_fields, optarg, (ADD_FIELD_STR_LEN - 1));
-			opt_add++;
-			continue;
-		case 'v':
-			opt_verbose++;
-			continue;
-		case 'a':
-			v4andv6 = true;
-			continue;
-		}
-
-		if (c >= array_size(infos) || !infos[c].opt_val_v6) {
-			verbosef(0, stderr, "%s: Invalid option \'-%c\'\n",
-				 progname, optopt);
-			print_usage(1);
-		}
-
-		infos[c].option_given = 1;
-		given_options++;
-	}
-
-#ifdef DYNAMIC_PF_RDS
-	pf = discover_pf_rds();
-	sol = discover_sol_rds();
-#else
-	pf = PF_RDS;
-	sol = SOL_RDS;
-#endif
 	fd = socket(pf, SOCK_SEQPACKET, 0);
 	if (fd < 0) {
 		verbosef(0, stderr, "%s: Unable to create socket: %s\n",
@@ -847,4 +826,381 @@ int main(int argc, char **argv)
 	}
 
 	return 0;
+}
+
+/*
+ * Check whether the process can access other namespaces
+ */
+#define GET_DLSYM(symbol)	symbol##f = dlsym(libdhash, #symbol)
+static bool check_netns_access()
+{
+	char			*error;
+	cap_t			proc_caps;
+	cap_flag_value_t	cap_sys_admin, cap_sys_ptrace;
+
+	/*
+	 * Dynamically link the "dhash" library and look up the necessary
+	 * functions in it
+	 */
+	libdhash = dlopen(LIBDHASH, RTLD_LAZY);
+	if (libdhash == NULL) {
+		verbosef(0, stderr,
+		    "Unable to process network namespaces:  \"%s\" not found\n",
+		    LIBDHASH);
+		return false;
+	}
+
+	(void) dlerror();	/* clear any errors */
+	GET_DLSYM(hash_create);
+	GET_DLSYM(hash_destroy);
+	GET_DLSYM(hash_enter);
+	GET_DLSYM(hash_entries);
+	GET_DLSYM(hash_error_string);
+	GET_DLSYM(hash_has_key);
+	error = dlerror();	/* were there any errors? */
+	if (error != NULL) {
+		verbosef(0, stderr, "Error:  Unable to use \"%s\":  %s\n",
+			 LIBDHASH, error);
+		return false;
+	}
+
+	/*
+	 * CAP_SYS_PTRACE is required to access /proc/<pid>/ns/net and
+	 * CAP_SYS_ADMIN is required to execute setns()
+	 */
+	proc_caps = cap_get_proc();
+	if (proc_caps == NULL) {
+		verbosef(0, stderr, "Error getting process capabilities:  %s\n",
+			 strerror(errno));
+		return false;
+	}
+	(void) cap_get_flag(proc_caps, CAP_SYS_ADMIN, CAP_EFFECTIVE,
+			    &cap_sys_admin);
+	(void) cap_get_flag(proc_caps, CAP_SYS_PTRACE, CAP_EFFECTIVE,
+			    &cap_sys_ptrace);
+	cap_free(proc_caps);
+	if ((cap_sys_admin != CAP_SET) || (cap_sys_ptrace != CAP_SET)) {
+		verbosef(0, stderr,
+			 "Insufficient privilege to access other namespaces\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool valid_pid(char *string)
+{
+	char	*chr, *end;
+
+	for (chr = string, end = chr + strlen(string); chr < end; chr++) {
+		if (!isdigit(*chr))
+			return false;
+	}
+
+	return true;
+}
+
+static void close_netns(hash_entry_t *item, hash_destroy_enum type, void *pvt)
+{
+	(void) close(item->value.i);
+}
+
+/*
+ * Sort the home network namespace first, followed by other namespaces in
+ * numerical order
+ */
+static int compare_netns(const void *key1, const void *key2)
+{
+	uint64_t	netns1 = ((hash_entry_t *)key1)->key.ul;
+	uint64_t	netns2 = ((hash_entry_t *)key2)->key.ul;
+
+	return ((netns1 == home_netns) ? -1 : (netns2 == home_netns) ? 1
+	    : (netns1 - netns2));
+}
+
+static int find_all_netns(DIR *procdir, hash_table_t *netnstbl,
+			  hash_entry_t **netnsp, size_t *num_netnsp)
+{
+	char		netnspath[MAXPATHLEN];
+	int		status;
+	struct dirent	*direntry;
+	struct stat	statbuf;
+	hash_entry_t	*netns;
+	hash_key_t	netnsinode = {HASH_KEY_ULONG};
+	hash_value_t	netnsfd = {HASH_VALUE_INT};
+	size_t		num_netns;
+
+	/*
+	 * Get the home network namespace ID for special handling
+	 */
+	if (stat(HOMENETNSPATH, &statbuf) != 0) {
+		verbosef(0, stderr,
+			 "Error getting home network namespace %s:  %s\n",
+		    HOMENETNSPATH, strerror(errno));
+		return 1;
+	}
+	home_netns = statbuf.st_ino;
+
+	/*
+	 * Walk /proc, collecting the network namespaces in a hash table
+	 */
+	for (errno = 0; (direntry = readdir(procdir)) != NULL; errno = 0) {
+		if (direntry->d_type != DT_DIR || !valid_pid(direntry->d_name))
+			continue;	/* can't be a process directory */
+
+		if (snprintf(netnspath, sizeof(netnspath), "%s/%s/ns/net",
+			     PROCDIR, direntry->d_name) < 0) {
+			verbosef(0, stderr,
+				 "Error creating netns path for PID %s:  %s\n",
+				 direntry->d_name, strerror(errno));
+			return 1;
+		}
+
+		/*
+		 * Use the process' network namespace inode as the hash table
+		 * key
+		 */
+		if (stat(netnspath, &statbuf) == 0) {
+			netnsinode.ul = statbuf.st_ino;
+		} else if (errno == ENOENT) {
+			continue;	/* process must have exited */
+		} else {
+			verbosef(0, stderr,
+				 "Error getting information for %s:  %s\n",
+				 netnspath, strerror(errno));
+			return 1;
+		}
+
+		if (hash_has_keyf(netnstbl, &netnsinode))
+			continue;	/* we've been here before */
+
+		/*
+		 * Open the process' network namespace:  The file descriptor is
+		 * needed to switch to that namespace, and the reference will
+		 * keep the namespace from being destroyed even if its last
+		 * process exits before we've accessed the namespace.
+		 *
+		 * Set the close-on-exec flag for the descriptor, so that any
+		 * descendent programs won't have access to the namespace by
+		 * default.
+		 */
+		netnsfd.i = open(netnspath, O_CLOEXEC|O_RDONLY);
+		if (netnsfd.i == -1) {
+			if (errno == ENOENT) {
+				continue;	/* process must have exited */
+			} else {
+				verbosef(0, stderr, "Error opening %s:  %s\n",
+					 netnspath, strerror(errno));
+				return 1;
+			}
+		}
+
+		/*
+		 * Add the process' network namespace to the hash table
+		 */
+		status = hash_enterf(netnstbl, &netnsinode, &netnsfd);
+		if (status != HASH_SUCCESS) {
+			verbosef(0, stderr,
+			    "Error entering network namespace in table:  %s\n",
+			    hash_error_stringf(status));
+			return 1;
+		}
+	}
+	if (errno != 0) {
+		verbosef(0, stderr, "Error reading %s:  %s\n", PROCDIR,
+			 strerror(errno));
+		return 1;
+	}
+
+	/*
+	 * Get an array of all the hash table entries, then sort it with the
+	 * home network namespace first, followed by the remaining namespaces
+	 * in numerical order of their IDs
+	 */
+	status = hash_entriesf(netnstbl, &num_netns, &netns);
+	if (status != HASH_SUCCESS) {
+		verbosef(0, stderr,
+			 "Error retrieving netns entries from table:  %s\n",
+			 hash_error_stringf(status));
+		return 1;
+	}
+	qsort(netns, num_netns, sizeof(*netns), compare_netns);
+
+	*netnsp = netns;
+	*num_netnsp = num_netns;
+	return 0;
+}
+
+/*
+ * Print the RDS information for each network namespace
+ */
+static int print_rds_info_each_netns(int given_options, bool v4andv6, int pf,
+				     int sol, uint64_t *current_ns,
+				     hash_entry_t netns[], size_t num_netns)
+{
+	char	*description;
+	int	i;
+
+	for (i = 0; i < num_netns; i++) {
+		/* Go to the namespace */
+		if (i == 0) {
+			/* netns[0] corresponds to the home namespace */
+			description = " (home namespace)";
+		} else if (setns(netns[i].value.i, 0) == 0) {
+			*current_ns = netns[i].key.ul;
+			description = "";
+		} else {
+			verbosef(0, stderr,
+				 "Error changing network namespace:  %s\n",
+				 strerror(errno));
+			return 1;
+		}
+
+		/* Print the namespace's RDS information */
+		(void) printf("\n##################################################\n"
+			      "#\n# Network namespace %lu%s\n#\n",
+			      netns[i].key.ul, description);
+		if (rds_info(given_options, v4andv6, pf, sol) != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * Find all the network namespaces, then get the RDS information in each of them
+ */
+static int rds_info_all_netns_impl(int given_options, bool v4andv6, int pf,
+				   int sol, hash_table_t *netnstbl)
+{
+	int		status;
+	uint64_t	current_ns;
+	DIR		*procdir;
+	hash_entry_t	*netns = NULL;
+	size_t		num_netns;
+
+	/*
+	 *  Find all the network namespaces
+	 */
+	procdir = opendir(PROCDIR);
+	if (procdir == NULL) {
+		verbosef(0, stderr, "Error opening %s:  %s\n", PROCDIR,
+			 strerror(errno));
+		return 1;
+	}
+	status = find_all_netns(procdir, netnstbl, &netns, &num_netns);
+	(void) closedir(procdir);
+	if (status != 0)
+		return 1;
+
+	/*
+	 *  Get the RDS information in each network namespace
+	 */
+	(void) setvbuf(stdout, NULL, _IOLBF, BUFSIZ); /* don't buffer stdout */
+	current_ns = netns[0].key.ul;
+	status = print_rds_info_each_netns(given_options, v4andv6, pf, sol,
+					   &current_ns, netns, num_netns);
+	/* Return to the home namespace if we left it */
+	if ((current_ns != netns[0].key.ul)
+	    && (setns(netns[0].value.i, 0) != 0)) {
+		verbosef(0, stderr,
+			 "Error returning to home network namespace:  %s\n",
+			 strerror(errno));
+		status = 1;
+	}
+	free(netns);
+
+	return status;
+}
+
+/*
+ * Get the RDS information for all network namespaces
+ */
+static int rds_info_all_netns(int given_options, bool v4andv6, int pf, int sol)
+{
+	int		status;
+	hash_table_t	*netnstbl = NULL;
+
+	status = hash_createf(NETNSTBLSIZE, &netnstbl, close_netns, NULL);
+	if (status != HASH_SUCCESS) {
+		verbosef(0, stderr,
+			 "Error creating network namespace table:  %s\n",
+			 hash_error_stringf(status));
+		return 1;
+	}
+	status = rds_info_all_netns_impl(given_options, v4andv6, pf, sol,
+					 netnstbl);
+	(void) hash_destroyf(netnstbl);
+
+	return status;
+}
+
+int main(int argc, char **argv)
+{
+	char optstring[258] = "aNo:v+";
+	int given_options = 0;
+	int c;
+	char *last;
+	int i;
+	int pf;
+	int sol;
+	bool v4andv6;
+	int status;
+	bool all_netns = false;
+
+	/* Default is to print out IPv4 RDS connection info only. */
+	v4andv6 = false;
+
+	/* quickly append all our info options to the optstring */
+	last = &optstring[strlen(optstring)];
+	for (i = 0; i < array_size(infos); i++) {
+		if (!infos[i].opt_val_v6)
+			continue;
+		*last = (char)i;
+		last++;
+		*last = '\0';
+	}
+
+	while ((c = getopt(argc, argv, optstring)) != EOF) {
+		switch (c) {
+		case 'o':
+			strncpy(add_fields, optarg, (ADD_FIELD_STR_LEN - 1));
+			opt_add++;
+			continue;
+		case 'v':
+			opt_verbose++;
+			continue;
+		case 'a':
+			v4andv6 = true;
+			continue;
+		case 'N':
+			if (!check_netns_access())
+				return 1;
+			all_netns = true;
+			continue;
+		}
+
+		if (c >= array_size(infos) || !infos[c].opt_val_v6) {
+			verbosef(0, stderr, "%s: Invalid option \'-%c\'\n",
+				 progname, optopt);
+			print_usage(1);
+		}
+
+		infos[c].option_given = 1;
+		given_options++;
+	}
+
+#ifdef DYNAMIC_PF_RDS
+	pf = discover_pf_rds();
+	sol = discover_sol_rds();
+#else
+	pf = PF_RDS;
+	sol = SOL_RDS;
+#endif
+
+	status = all_netns ? rds_info_all_netns(given_options, v4andv6, pf, sol)
+			   : rds_info(given_options, v4andv6, pf, sol);
+	if (libdhash != NULL)
+		(void) dlclose(libdhash);
+	return status;
 }

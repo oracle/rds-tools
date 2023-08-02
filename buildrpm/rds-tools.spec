@@ -7,7 +7,7 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
-Version:	2.3.8
+Version:	2.3.9
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -67,6 +67,26 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Wed Aug 02 2023 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.9-1
+- rds-ping: Add missing '-i' option to rds-ping usage (Mark Haywood) [Orabug: 34734493]
+- man: Add missing '-Q' option to rds-ping(1) (Mark Haywood) [Orabug: 34734543]
+- rds-stress: Clean up the internal options structure implementation (Mark Haywood) [Orabug: 34979190]
+- rds-stress: Add new json options exchange logic for rds-stress (Rohit Nair) [Orabug: 34979190]
+- rds-stress: Use port[0] for rds-stress reset (Rohit Nair) [Orabug: 35156783]
+- rds-stress: Fix initialization of rtt_threshold (Mark Haywood) [Orabug: 35284851]
+- rds-stress: Remove trailing whitespace (Mark Haywood) [Orabug: 35284851]
+- rds-tools: Add a flag to rds-stress and enable rds-inq capability (Devesh Sharma) [Orabug: 35333242]
+- rds-tools: Add rds-inq description to man page (Devesh Sharma) [Orabug: 35333242]
+- rds-stress: Fix "-Wstringop-truncation" compiler warnings (Mark Haywood) [Orabug: 35430732]
+- rds-stress: Fix "-Waddress-of-packed-member" compiler warnings (Mark Haywood) [Orabug: 35430637]
+- rds-info: Fix "-Waddress-of-packed-member" compiler warnings (Mark Haywood) [Orabug: 35430597]
+- rds-stress: Add percentage of IO/packet in rds-stress --show-histogram (Allison Henderson) [Orabug: 35360167]
+- rds-stress: Enable rds-inq by default, disable when asked (Devesh Sharma) [Orabug: 35418380]
+- rds-stress: update man page to reflect change in options (Devesh Sharma) [Orabug: 35418380]
+- rds-stress: fix the type-punned build warning (Devesh Sharma) [Orabug: 35418380]
+- rds-info: Add option to report information for all network namespaces (Greg Jumper) [Orabug: 34270854]
+- Revert "rds-ping: add transport option" (Mark Haywood) [Orabug: 35658752]
+
 * Fri Sep 16 2022 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.8-1
 - rds-info: Extend rds-info -Iv functionality to display SCQ and RCQ IRQ vectors (Mark Haywood) [Orabug: 34426225]
 - rds-info: Move the conn_drop_reasons array from rds.h to rds-info.c (Mark Haywood) [Orabug: 34466041]

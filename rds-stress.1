@@ -170,6 +170,11 @@ Generate perf data output for script parsing.
 Reset the connection and exit.
 .It Fl --async
 Enable async sends.
+.It Fl -always-bursty
+Always flip-flop between send-only, then receive-only mode.
+This is to avoid the slower-is-faster paradox, which happens when the cost
+of a sendmsg becomes higher than the cost of a recvmsg making rds-stress transition
+from a bursty test-mode to a streaming test-mode.
 .El
 .Ss RDMA specific Options:
 .Bl -tag -width Ds

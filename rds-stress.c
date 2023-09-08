@@ -47,6 +47,11 @@
  *  - final stats summary page
  */
 
+enum burst_mode {
+	BURST_MODE_SEND,
+	BURST_MODE_RECV,
+};
+
 enum {
         M_RDMA_READWRITE = 0,
         M_RDMA_READ_ONLY,
@@ -97,6 +102,7 @@ struct options {
 	 * of any new option should take place in process_json_option() since all new
 	 * options will be exchanged between the client and the server using json.
 	 */
+	uint8_t		always_bursty;
 } __attribute__((packed));
 
 /*
@@ -164,6 +170,7 @@ static struct rs_option rs_options[] = {
 	{ "receive_addr6", RS_OPTION_V6ADDR, offsetof(struct options, receive_addr6) },
 	{ "addr_scope_id ", RS_OPTION_UINT32, offsetof(struct options, addr_scope_id) },
 	{ "disable_inq", RS_OPTION_UINT8, offsetof(struct options, inq_enabled) },
+	{ "always_bursty", RS_OPTION_UINT8, offsetof(struct options, always_bursty) },
 	{ NULL, 0, 0 }
 };
 
@@ -513,6 +520,7 @@ static void usage(void)
 	" --async                       enable async sends\n"
 	" --cancel-sent-to              child processes issue RDS_CANCEL_SENT_TO. Use Ctrl-C\n"
 	" --abort-after [seconds]       parent process terminates after [seconds] in the midst of operation\n"
+	" --always-bursty               always flip-flop between send-only, then receive-only mode\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"
@@ -913,18 +921,26 @@ static int rds_socket(struct options *opts, union sockaddr_ip *sp,
 	optlen = sizeof(val);
 	if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &val, &optlen))
 		die_errno("getsockopt(SNDBUF) failed");
-	if (val / 2 < bytes && !opts->suppress_warnings)
+	if (val / 2 < bytes &&
+	    (opts->always_bursty || !opts->suppress_warnings)) {
 		fprintf(stderr,
 			"getsockopt(SNDBUF) returned %d, we wanted %d * 2\n",
 			val, bytes);
+		if (opts->always_bursty)
+			exit(3);
+	}
 
 	optlen = sizeof(val);
 	if (getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &val, &optlen))
 		die_errno("getsockopt(RCVBUF) failed");
-	if (val / 2 < bytes && !opts->suppress_warnings)
+	if (val / 2 < bytes &&
+	    (opts->always_bursty || !opts->suppress_warnings)) {
 		fprintf(stderr,
 			"getsockopt(RCVBUF) returned %d, we need %d * 2\n",
 			val, bytes);
+		if (opts->always_bursty)
+			exit(3);
+	}
 
 	val = 1;
 	if (opts->use_cong_monitor
@@ -2263,6 +2279,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct options *opts, uint16_t id, int active,
 		      bool isv6)
 {
+	enum burst_mode burst_mode;
 	union sockaddr_ip sp;
 	struct pollfd pfd;
 	int fd, inq;
@@ -2415,13 +2432,22 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	if (cancel_sent_to)
 		signal(SIGINT, SIG_IGN);
 
+	burst_mode = do_work ? BURST_MODE_SEND : BURST_MODE_RECV;
 	pfd.fd = fd;
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
 		struct task *t;
 		int can_send, more_data_inq;
+		int all_clear, all_full;
 
 		check_parent(parent_pid, fd, isv6, opts);
+
+		if (opts->always_bursty) {
+			if (burst_mode == BURST_MODE_RECV)
+				pfd.events |= POLLIN;
+			else
+				pfd.events &= ~POLLIN;
+		}
 
 		ret = poll(&pfd, 1, 1000);
 		if (ret < 0) {
@@ -2451,7 +2477,8 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 			if (t->drain_rdmas)
 				continue;
 			if (send_anything(fd, t, opts, ctl, can_send,
-					  do_work, isv6) < 0) {
+					  do_work && (!opts->always_bursty || burst_mode == BURST_MODE_SEND),
+					  isv6) < 0) {
 
 				pfd.events |= POLLOUT;
 
@@ -2473,6 +2500,29 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 					continue;
 				else
 					break;
+			}
+		}
+
+		if (!opts->always_bursty)
+			continue;
+
+		/* check if it's time to switch burst_mode */
+		all_clear = 1;
+		all_full = 1;
+		for (i = 0, t = tasks; i < opts->nr_tasks; i++, t++) {
+			if (t->pending > 0)
+				all_clear = 0;
+			if (t->pending < opts->req_depth)
+				all_full = 0;
+		}
+
+		if (burst_mode == BURST_MODE_SEND) {
+			if (all_full)
+				burst_mode = BURST_MODE_RECV;
+		} else {
+			if (do_work && all_clear) {
+				burst_mode = BURST_MODE_SEND;
+				pfd.events |= POLLOUT;
 			}
 		}
 	}
@@ -3871,6 +3921,7 @@ enum {
 	OPT_CANCEL_SENT_TO,
 	OPT_ABORT_AFTER,
 	OPT_DISABLE_RDS_INQ,
+	OPT_ALWAYS_BURSTY,
 };
 
 static struct option long_options[] = {
@@ -3911,6 +3962,7 @@ static struct option long_options[] = {
 { "cancel-sent-to",     no_argument,            NULL,   OPT_CANCEL_SENT_TO },
 { "abort-after",        required_argument,      NULL,   OPT_ABORT_AFTER },
 { "disable-inq",	no_argument,		NULL,	OPT_DISABLE_RDS_INQ },
+{ "always-bursty",      no_argument,            NULL,   OPT_ALWAYS_BURSTY },
 { NULL }
 };
 
@@ -3924,6 +3976,9 @@ static int process_json_option(int c, struct options *opts)
 	switch(c) {
 		case OPT_DISABLE_RDS_INQ:
 			opts->inq_enabled = 0;
+			break;
+		case OPT_ALWAYS_BURSTY:
+			opts->always_bursty = 1;
 			break;
 		default:
 			ret = 1;
@@ -3997,6 +4052,7 @@ int main(int argc, char **argv)
 	opts.tos = 0;
 	opts.async = 0;
 	opts.inq_enabled = 1;
+	opts.always_bursty = 0;
 	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 

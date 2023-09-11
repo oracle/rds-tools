@@ -3548,7 +3548,12 @@ static int active_parent(struct options *opts,
 	/* Tell the peer to start up. This is necessary when testing
 	 * with a large number of tasks, because otherwise the peer
 	 * may start sending before we have all our tasks running.
+	 * If more options are being exchanged using json, then wait
+	 * until those are exchanged to start tasks.
 	 */
+	if (!use_json)
+		ctl = start_children(opts, 1, isv6);
+	
 	peer_send(fd, &ok, sizeof(ok));
 	peer_recv(fd, &ok, sizeof(ok), false);
 
@@ -3558,31 +3563,31 @@ static int active_parent(struct options *opts,
 	 * peer_recv(ok) call. Based on the value received we either
 	 * send the new json options or continue as expected.
 	 */
-
-	if (use_json && ok == JSON_IDENTIFIER) {
+	if (use_json) {
 		trace("RDS: passive_parent support json exchange. json options will be exchanged.\n");
+
+		/* The active_parent wants to exchange json options, but the passive_parent does not
+		 * support json exchange. We should not continue.
+		 */
+		if (ok != JSON_IDENTIFIER)
+			die("Remote server does not support json option exchange.\n");
 
 		json_options = create_json_string(opts);
 		peer_json_send(json_options, fd);
 		free(json_options);
 
-		printf("negotiated options, tasks will start in 2 seconds\n");
-		ctl = start_children(opts, 1, isv6);
-
 		remote_json_options = peer_json_recv(fd);
 		verify_remote_json_options(remote_json_options);
 		free(remote_json_options);
 
+		/* All options have been exchanged so we can start the tasks now */
+		ctl = start_children(opts, 1, isv6);
+
 		peer_send(fd, &ok, sizeof(ok));
 		peer_recv(fd, &ok, sizeof(ok), false);
-
-	} else if (use_json) {
-		die("Remote server does not support json option exchange.\n");
-	} else {
-		printf("negotiated options, tasks will start in 2 seconds\n");
-		ctl = start_children(opts, 1, isv6);
 	}
 
+	printf("negotiated options, tasks will start in 2 seconds\n");
 	release_children_and_wait(opts, ctl, soak_arr, 1);
 
 	return 0;
@@ -3712,13 +3717,13 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 	 * flag. If the json flag is set, the active_parent supports json
 	 * exchange and we need to send the JSON_IDENTIFIER back in the
 	 * peer_send(ok) call to intiate the json options exchange.
-	 * If the flag is absent, we contiue execution normally without
+	 * If the flag is absent, we continue execution normally without
 	 * the json option exchange.
 	 */
-
 	if (!check_json_flag((char *)peer_version + json_flag_offset))
 		ok = JSON_IDENTIFIER;
 
+	/* If no json option exchange, start the tasks */
 	if (ok != JSON_IDENTIFIER)
 		ctl = start_children(opts, 0, isv6);
 
@@ -3742,6 +3747,7 @@ static int passive_parent(union sockaddr_ip *addr, uint16_t port,
 		peer_json_send(json_options, fd);
 		free(json_options);
 
+		/* All options have been exchanged so we can start the tasks now */
 		ctl = start_children(opts, 0, isv6);
 		peer_recv(fd, &ok, sizeof(ok), false);
 		peer_send(fd, &ok, sizeof(ok));

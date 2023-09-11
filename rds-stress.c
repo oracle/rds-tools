@@ -95,18 +95,19 @@ struct options {
 } __attribute__((packed));
 
 /*
- * There have been three version of the options structure. The first one had no version,
- * tos or async which were added in version two. The third version added the IPv6 support
- * with send_addr6, receive_addr6 and addr_scope_id fields. The structure needs to be
- * capable of running against servers running any of the versions.
+ * There have been three versions of the options structure. The first one had no 'version',
+ * 'tos' or 'async' fields which were added in version two. The third version added the
+ * IPv6 support with the 'send_addr6', 'receive_addr6' and 'addr_scope_id' fields. The
+ * structure needs to be capable of running against a server (aka, passive_parent) running
+ * any of the versions. Future options, starting with 'inq_enabled, will be exchanged between
+ * the passive_parent and active_parent using json. With luck, at some point we will be able
+ * to retire this old method of exchanging these option values using these structures and
+ * require both the active_parent and the passive_parent to be versions that support the
+ * json exchange.
  */
 #define	OPTIONS_V1_SIZE		offsetof(struct options, tos) - offsetof(struct options, req_depth)
 #define	OPTIONS_V2_SIZE		offsetof(struct options, send_addr6)
-/* When adding a new option to the options struct the OPTIONS_V3_SIZE has to be
- * updated with the offset to that field.
- * Ex: #define	OPTIONS_V3_SIZE	offsetof(struct options, new_option)
- */
-#define	OPTIONS_V3_SIZE		sizeof(struct options)
+#define	OPTIONS_V3_SIZE		offsetof(struct options, inq_enabled)
 
 enum rs_option_type {
 	RS_OPTION_V6ADDR = 0,
@@ -3287,7 +3288,6 @@ static void encode_options(struct options *dst,
 	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
 		       sizeof(dst->receive_addr6));
 	dst->addr_scope_id = htonl(src->addr_scope_id);
-	dst->inq_enabled = src->inq_enabled;
 }
 
 static void decode_options(struct options *dst,
@@ -3331,7 +3331,6 @@ static void decode_options(struct options *dst,
 	(void) memmove(&dst->receive_addr6, &src->receive_addr6,
 		       sizeof(dst->receive_addr6));
 	dst->addr_scope_id = ntohl(src->addr_scope_id);
-	dst->inq_enabled = src->inq_enabled;
 
 }
 
@@ -3339,12 +3338,10 @@ static void verify_option_encdec(const struct options *opts)
 {
 	struct options ebuf;
 	struct options dbuf;
-	size_t opt_size;
 	unsigned int i;
 
-	opt_size = sizeof(struct options);
-	(void) memcpy(&dbuf, opts, opt_size);
-	for (i = 0; i < opt_size; ++i) {
+	(void) memcpy(&dbuf, opts, OPTIONS_V3_SIZE);
+	for (i = 0; i < OPTIONS_V3_SIZE; ++i) {
 		unsigned char *x = &((unsigned char *) &dbuf)[i];
 
 		*x = ~*x;
@@ -3353,7 +3350,7 @@ static void verify_option_encdec(const struct options *opts)
 	encode_options(&ebuf, opts);
 	decode_options(&dbuf, &ebuf);
 
-	if (memcmp(&dbuf, opts, opt_size))
+	if (memcmp(&dbuf, opts, OPTIONS_V3_SIZE))
 		die("encode/decode check of options struct failed\n");
 }
 
@@ -3488,8 +3485,8 @@ static int active_parent(struct options *opts,
 		printf("\n");
 	}
 
-	/* Make sure that when we add new options, we don't forget
-	 * to add them to the encode/decode routines. */
+	/* Make sure that all the options exchanged via the old
+	 * structure mechanism have encode/decode routines */
 	verify_option_encdec(opts);
 
 	if (isv6) {
@@ -3940,7 +3937,7 @@ int main(int argc, char **argv)
 	set_send_addr = false;
 	set_recv_addr = false;
 
-	(void)memset(&opts, 0xff, OPTIONS_V3_SIZE);
+	(void)memset(&opts, 0xff, sizeof(struct options));
 
 	/* Use IPv4 by default if the user does not specify an address.*/
 	isv6 = false;
@@ -4140,6 +4137,7 @@ int main(int argc, char **argv)
 				break;
 			case OPT_DISABLE_RDS_INQ:
 				opts.inq_enabled = 0;
+				use_json = 1;
 				break;
 			case 'h':
 			case '?':

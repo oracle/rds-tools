@@ -3434,10 +3434,10 @@ static char *create_json_string(const struct options *opts)
  */
 static int active_parent(struct options *opts,
 			 struct soak_control *soak_arr,
-			 bool isv6,
-			 char *json_options)
+			 bool isv6)
 {
 	struct options enc_options;
+	char *json_options;
 	char *remote_json_options;
 	struct child_control *ctl;
 	union sockaddr_ip sp;
@@ -3562,11 +3562,12 @@ static int active_parent(struct options *opts,
 	if (use_json && ok == JSON_IDENTIFIER) {
 		trace("RDS: passive_parent support json exchange. json options will be exchanged.\n");
 
+		json_options = create_json_string(opts);
 		peer_json_send(json_options, fd);
+		free(json_options);
+
 		printf("negotiated options, tasks will start in 2 seconds\n");
 		ctl = start_children(opts, 1, isv6);
-
-		free(json_options);
 
 		remote_json_options = peer_json_recv(fd);
 		verify_remote_json_options(remote_json_options);
@@ -3576,7 +3577,6 @@ static int active_parent(struct options *opts,
 		peer_recv(fd, &ok, sizeof(ok), false);
 
 	} else if (use_json) {
-		free(json_options);
 		die("Remote server does not support json option exchange.\n");
 	} else {
 		printf("negotiated options, tasks will start in 2 seconds\n");
@@ -3911,7 +3911,6 @@ int main(int argc, char **argv)
 	struct options opts;
 	struct soak_control *soak_arr = NULL;
 	union sockaddr_ip recv_addr, send_addr;
-	char *json_options = NULL;
 	bool set_send_addr;
 	bool set_recv_addr;
 	bool isv6_prev;
@@ -4206,8 +4205,7 @@ int main(int argc, char **argv)
 
 		trace("RDS: rds-stress will use json option exchange\n");
 		strcpy(opts.version + json_flag_offset, "json");
-		json_options = create_json_string(&opts);
 	}
 
-	return active_parent(&opts, soak_arr, isv6, json_options);
+	return active_parent(&opts, soak_arr, isv6);
 }

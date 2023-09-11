@@ -91,7 +91,12 @@ struct options {
         struct in6_addr receive_addr6;
         uint32_t        addr_scope_id;	/* only meaningful locally */
 	uint8_t		inq_enabled;
-	/* When adding new options they also need to be added to rs_options struct */
+	/*
+	 * When adding new options they should be added at end of this structure and they
+	 * also need to be added to the rs_options struct below. The command line processing
+	 * of any new option should take place in process_json_option() since all new
+	 * options will be exchanged between the client and the server using json.
+	 */
 } __attribute__((packed));
 
 /*
@@ -172,7 +177,6 @@ static int		reset_connection;
 static uint8_t		cancel_sent_to;
 static uint32_t		abort_after;
 static char		peer_version[VERSION_MAX_LEN];
-static int		use_json;
 
 /*
  * Used to represent both IPv4 and IPv6 sockaddr.
@@ -3431,7 +3435,8 @@ static char *create_json_string(const struct options *opts)
  */
 static int active_parent(struct options *opts,
 			 struct soak_control *soak_arr,
-			 bool isv6)
+			 bool isv6,
+			 int use_json)
 {
 	struct options enc_options;
 	char *json_options;
@@ -3909,6 +3914,25 @@ static struct option long_options[] = {
 { NULL }
 };
 
+/*
+ * All new options should be added as json options
+ */
+static int process_json_option(int c, struct options *opts)
+{
+	int ret = 0;
+
+	switch(c) {
+		case OPT_DISABLE_RDS_INQ:
+			opts->inq_enabled = 0;
+			break;
+		default:
+			ret = 1;
+			break;
+	}
+
+	return ret;
+}
+
 int main(int argc, char **argv)
 {
 	struct options opts;
@@ -3918,6 +3942,7 @@ int main(int argc, char **argv)
 	bool set_recv_addr;
 	bool isv6_prev;
 	bool isv6;
+	int use_json = 0;
 
 #ifdef DYNAMIC_PF_RDS
 	pf = discover_pf_rds();
@@ -3980,10 +4005,6 @@ int main(int argc, char **argv)
 	reset_connection = 0;
 	cancel_sent_to = 0;
 	abort_after = 0;
-	/* Set use_json to 1 when adding a new option utilizing
-	 * the json option exchange mechanism.
-	 */
-	use_json = 0;
 
 	while(1) {
 		int c, index;
@@ -4135,14 +4156,15 @@ int main(int argc, char **argv)
 			case OPT_PERFDATA:
 				opts.show_perfdata = 1;
 				break;
-			case OPT_DISABLE_RDS_INQ:
-				opts.inq_enabled = 0;
-				use_json = 1;
-				break;
 			case 'h':
 			case '?':
-			default:
 				usage();
+				break;
+			default:
+				if (process_json_option(c, &opts) != 0) {
+					usage();
+				}
+				use_json = 1;
 				break;
 		}
 	}
@@ -4211,5 +4233,5 @@ int main(int argc, char **argv)
 		strcpy(opts.version + json_flag_offset, "json");
 	}
 
-	return active_parent(&opts, soak_arr, isv6);
+	return active_parent(&opts, soak_arr, isv6, use_json);
 }

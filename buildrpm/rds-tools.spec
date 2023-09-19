@@ -7,7 +7,7 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
-Version:	2.3.9
+Version:	2.3.10
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -67,6 +67,13 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Tue Sep 19 2023 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.10-1
+- rds-stress: Fix the receive address for json option exchanges (Mark Haywood) [Orabug: 35800876]
+- rds-stress: Simplify the json option exchange handshake (Mark Haywood) [Orabug: 35800910]
+- rds-stress: Exchange the rds-inq value using json (Mark Haywood) [Orabug: 35800936]
+- rds-stress: Facilitate json option exchange for all new options (Mark Haywood) [Orabug: 35800946]
+- rds-stress: Add support for option "--always-bursty" (Gerd Rausch) [Orabug: 35792064]
+
 * Wed Aug 02 2023 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.9-1
 - rds-ping: Add missing '-i' option to rds-ping usage (Mark Haywood) [Orabug: 34734493]
 - man: Add missing '-Q' option to rds-ping(1) (Mark Haywood) [Orabug: 34734543]

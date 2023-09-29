@@ -175,6 +175,18 @@ Always flip-flop between send-only, then receive-only mode.
 This is to avoid the slower-is-faster paradox, which happens when the cost
 of a sendmsg becomes higher than the cost of a recvmsg making rds-stress transition
 from a bursty test-mode to a streaming test-mode.
+.It Fl -sync-always-bursty
+Synchronizes the send-only and receive-only modes with other processes
+via a System V semaphore.
+Without this option, the send-only and receive-only modes
+of processes are not synchronized, and can drift from each other,
+especially with multiple invocations of "rds-stress".
+All processes sending at the same time, and subsequently hitting upon
+bottlenecks at the same time, is a different performance-test
+than processes sending at slightly different times.
+If that distinction is uncontrolled and left to chance, performance measurements
+are left to chance as well.
+This option implies and enables the \fB--always-bursty\fP.
 .El
 .Ss RDMA specific Options:
 .Bl -tag -width Ds

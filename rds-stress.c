@@ -29,6 +29,8 @@
 #include <assert.h>
 #include <stddef.h>
 #include <signal.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 #include <json-c/json.h>
 #include "rds.h"
 
@@ -50,6 +52,7 @@
 enum burst_mode {
 	BURST_MODE_SEND,
 	BURST_MODE_RECV,
+	BURST_MODE_COUNT
 };
 
 enum {
@@ -103,6 +106,7 @@ struct options {
 	 * options will be exchanged between the client and the server using json.
 	 */
 	uint8_t		always_bursty;
+	uint8_t		sync_always_bursty;
 } __attribute__((packed));
 
 /*
@@ -171,6 +175,7 @@ static struct rs_option rs_options[] = {
 	{ "addr_scope_id ", RS_OPTION_UINT32, offsetof(struct options, addr_scope_id) },
 	{ "disable_inq", RS_OPTION_UINT8, offsetof(struct options, inq_enabled) },
 	{ "always_bursty", RS_OPTION_UINT8, offsetof(struct options, always_bursty) },
+	{ "sync_always_bursty", RS_OPTION_UINT8, offsetof(struct options, sync_always_bursty) },
 	{ NULL, 0, 0 }
 };
 
@@ -2274,6 +2279,67 @@ static int recv_one(int fd, struct task *tasks,
 	return ret;
 }
 
+static int get_sysv_sem(void)
+{
+	key_t key;
+	int semid;
+
+	key = ftok("/sys/module/rds", 'S');
+	if (key < 0)
+		die_errno("ftok(\"/sys/module/rds\", 'S') failed");
+
+	semid = semget(key, BURST_MODE_COUNT, IPC_CREAT);
+	if (semid < 0)
+		die_errno("semget() failed");
+
+	return semid;
+}
+
+static void sysv_sem_initial_mode(int semid, int mode)
+{
+	struct sembuf sop;
+
+	/* announce initial burst_mode for this process */
+
+	sop.sem_num = mode;
+	sop.sem_op  = 1;
+	sop.sem_flg = SEM_UNDO;
+	if (semop(semid, &sop, 1) != 0)
+		die_errno("semop() failed");
+}
+
+static void sysv_sem_switch_mode(int semid, int old_mode, int new_mode)
+{
+	struct sembuf sop;
+
+	/* exit old_mode */
+
+	sop.sem_num = old_mode;
+	sop.sem_op  = -1;
+	sop.sem_flg = SEM_UNDO;
+
+	if (semop(semid, &sop, 1) != 0)
+		die_errno("semop() failed");
+
+	/* wait for others to do the same */
+
+	sop.sem_num = old_mode;
+	sop.sem_op  = 0;
+	sop.sem_flg = 0;
+
+	if (semop(semid, &sop, 1) != 0)
+		die_errno("semop() failed");
+
+	/* emter new_mode */
+
+	sop.sem_num = new_mode;
+	sop.sem_op  = 1;
+	sop.sem_flg = SEM_UNDO;
+
+	if (semop(semid, &sop, 1) != 0)
+		die_errno("semop() failed");
+}
+
 static void run_child(pid_t parent_pid, struct child_control *ctl,
 		      struct child_control *all_ctl,
 		      struct options *opts, uint16_t id, int active,
@@ -2282,7 +2348,7 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 	enum burst_mode burst_mode;
 	union sockaddr_ip sp;
 	struct pollfd pfd;
-	int fd, inq;
+	int fd, inq, semid;
 	uint16_t i;
 	ssize_t ret;
 	struct task tasks[opts->nr_tasks];
@@ -2417,6 +2483,11 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		fprintf(stderr, "Setting RDS_INQ flag failed errno = %d \n",
 			errno);
 
+	if (opts->sync_always_bursty)
+		semid = get_sysv_sem();
+	else
+		semid = -1; /* make compiler happy */
+
 	ctl->ready = 1;
 
 	while (ctl->start.tv_sec == 0) {
@@ -2433,6 +2504,9 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 		signal(SIGINT, SIG_IGN);
 
 	burst_mode = do_work ? BURST_MODE_SEND : BURST_MODE_RECV;
+	if (opts->sync_always_bursty)
+		sysv_sem_initial_mode(semid, burst_mode);
+
 	pfd.fd = fd;
 	pfd.events = POLLIN | POLLOUT;
 	while (1) {
@@ -2514,14 +2588,23 @@ static void run_child(pid_t parent_pid, struct child_control *ctl,
 				all_clear = 0;
 			if (t->pending < opts->req_depth)
 				all_full = 0;
+			if (t->unacked || t->rdma_rd_unacked) {
+				all_clear = 0;
+				all_full = 0;
+			}
 		}
 
 		if (burst_mode == BURST_MODE_SEND) {
-			if (all_full)
+			if (all_full) {
 				burst_mode = BURST_MODE_RECV;
+				if (opts->sync_always_bursty)
+					sysv_sem_switch_mode(semid, BURST_MODE_SEND, BURST_MODE_RECV);
+			}
 		} else {
 			if (do_work && all_clear) {
 				burst_mode = BURST_MODE_SEND;
+				if (opts->sync_always_bursty)
+					sysv_sem_switch_mode(semid, BURST_MODE_RECV, BURST_MODE_SEND);
 				pfd.events |= POLLOUT;
 			}
 		}
@@ -3922,6 +4005,7 @@ enum {
 	OPT_ABORT_AFTER,
 	OPT_DISABLE_RDS_INQ,
 	OPT_ALWAYS_BURSTY,
+	OPT_SYNC_ALWAYS_BURSTY,
 };
 
 static struct option long_options[] = {
@@ -3963,6 +4047,7 @@ static struct option long_options[] = {
 { "abort-after",        required_argument,      NULL,   OPT_ABORT_AFTER },
 { "disable-inq",	no_argument,		NULL,	OPT_DISABLE_RDS_INQ },
 { "always-bursty",      no_argument,            NULL,   OPT_ALWAYS_BURSTY },
+{ "sync-always-bursty", no_argument,            NULL,   OPT_SYNC_ALWAYS_BURSTY },
 { NULL }
 };
 
@@ -3978,6 +4063,12 @@ static int process_json_option(int c, struct options *opts)
 			opts->inq_enabled = 0;
 			break;
 		case OPT_ALWAYS_BURSTY:
+			opts->always_bursty = 1;
+			break;
+		case OPT_SYNC_ALWAYS_BURSTY:
+			opts->sync_always_bursty = 1;
+
+			/* --sync-always-bursty implies --always-bursty */
 			opts->always_bursty = 1;
 			break;
 		default:
@@ -4053,6 +4144,7 @@ int main(int argc, char **argv)
 	opts.async = 0;
 	opts.inq_enabled = 1;
 	opts.always_bursty = 0;
+	opts.sync_always_bursty = 0;
 	memset(opts.version, '\0', VERSION_MAX_LEN);
 	strcpy(opts.version, RDS_VERSION);
 

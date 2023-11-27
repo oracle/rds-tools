@@ -7,7 +7,7 @@
 Name:		rds-tools
 Epoch:		%{uek5epoch}
 Summary:	RDS support tools
-Version:	2.3.10
+Version:	2.3.11
 Release:	1%{?dist}%{flavor}
 License:	GPLv2 or BSD
 Group:		Applications/System
@@ -67,6 +67,10 @@ rm -rf %{buildroot}
 %doc README docs examples
 
 %changelog
+* Mon Nov 27 2023 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.11-1
+- rds-stress: Synchronize burst-mode with other processes (Gerd Rausch) [Orabug: 35861956]
+- rds-stress: Add "--sync-always-bursty" to usage (Mark Haywood) [Orabug: 36050648]
+
 * Tue Sep 19 2023 Mark Haywood <mark.haywood@oracle.com> - 5:2.3.10-1
 - rds-stress: Fix the receive address for json option exchanges (Mark Haywood) [Orabug: 35800876]
 - rds-stress: Simplify the json option exchange handshake (Mark Haywood) [Orabug: 35800910]

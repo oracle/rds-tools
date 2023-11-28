@@ -526,6 +526,8 @@ static void usage(void)
 	" --cancel-sent-to              child processes issue RDS_CANCEL_SENT_TO. Use Ctrl-C\n"
 	" --abort-after [seconds]       parent process terminates after [seconds] in the midst of operation\n"
 	" --always-bursty               always flip-flop between send-only, then receive-only mode\n"
+	" --sync-always-bursty          synchonize the send-only and receive-only modes with other processes\n"
+	"                               via a System V semaphore (implies and enables the --always-bursty option)\n"
 	"\n"
 	"Example:\n"
 	"  recv$ rds-stress\n"

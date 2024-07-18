@@ -40,15 +40,3 @@ https://oss.oracle.com/projects/rds/dist/documentation/rds-3.1-spec.html
 
 This should result in an rds-tools rpm which is versioned by the VERSION
 in the Makefile and the subversion rev that was checked out.
-
-## Contributing
-
-This project welcomes contributions from the community. Before submitting a pull request, please [review our contribution guide](./CONTRIBUTING.md)
-
-## Security
-
-Please consult the [security guide](./SECURITY.md) for our responsible security vulnerability disclosure process
-
-## License
-
-Copyright (c) 2006, 2024 Oracle and/or its affiliates.
